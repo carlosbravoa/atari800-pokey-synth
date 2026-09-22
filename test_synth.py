@@ -120,6 +120,7 @@ def frame(key=None):
     call("lv_step", x=20)
     call("lv_step", x=0)
     call("drum_step")
+    call("bar_flash")
     call("pokey_out")
     return w(L("OUTLO")), mem[L("VOLHI")], mem[L("ESTATE")]
 
@@ -687,12 +688,18 @@ tap(SP)
 check(mem[L("LSTATE")] == 5, "SPACE -> count-in (COUNT)")
 row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 6:0x4000 + 10 * 40 + 11])
 check(row == "COUNT", f"loop row shows '{row}'")
-n = 0
+n, flash = 0, []
 while mem[L("LSTATE")] == 5 and n < 16 * RS + 8:
     frame(); main_frame(); n += 1
+    if mem[L("COLOR4")]: flash.append(n)
 check(mem[L("LSTATE")] == 1 and 16 * RS - 2 <= n <= 16 * RS and w(L("LPOSLO")) == 0,
       f"one bar of count-in ({n} frames, one already spent on the SPACE frame), REC from 0")
 check((mem[L("DRUMCNT")] - d0) & 255 == 4, "4 metronome clicks during the count-in")
+more = 0
+while mem[L("COLOR4")]:
+    frame(); main_frame(); more += 1
+check(flash and flash[-1] == n and len(flash) + more - 1 == 3 and mem[L("COLOR4")] == 0,
+      f"border flashes 3 frames from the bar line, then clears")
 row = [mem[0x4000 + 10 * 40 + 12 + i] for i in range(16)]
 cur = [i for i, c in enumerate(row) if c == ord('f')]
 beats = [i for i, c in enumerate(row) if c == ord('h')]

@@ -270,6 +270,7 @@ SNAPD    = $0BA2        ; signed: frames to the nearest grid step
 GRIDST   = $0BA3        ; step within the bar (0-15)
 BARN     = $0BA4        ; bars recorded so far
 GRIDON   = $0BA5        ; 1 = metronome + snap + whole-bar loops
+BFLASH   = $0BA6        ; frames left of the bar-line border flash
 LS_CNT   = 5            ; counting in (one bar of clicks before REC)
 UPTR     = $F2          ; VBI-owned ZP (with VP $F0-$F1)
 K_I      = $0D          ; undo
@@ -2005,8 +2006,20 @@ vbi:
         ldx #0
         jsr lv_step
         jsr drum_step
+        jsr bar_flash
         jsr pokey_out
         jmp XITVBV
+
+bar_flash:                      ; the bar line flashes the border
+        lda BFLASH
+        beq @off
+        dec BFLASH
+        lda LITCOL
+        ora #$0E
+        bne @set
+@off:   lda #0
+@set:   sta COLOR4
+        rts
 
 kb_poll:
         lda REMHOLD             ; remote test key overrides the hardware
@@ -2564,6 +2577,8 @@ grid_step:
         lda #0
         sta GRIDST
         inc BARN
+        lda #3                  ; bar line: flash the border too
+        sta BFLASH
 @beat:  lda GRIDST
         and #3                  ; click on each beat (every 4 steps)
         bne @x

@@ -221,6 +221,10 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
   Note-ons and drums are written at VP + SNAPD (`snap_vp`/`unsnap_vp`,
   which is also what `undo_push` logs). Note-offs keep their real timing,
   so phrasing survives.
+- **Bar-line flash**: `grid_step` sets BFLASH `$0BA6` = 3 at each bar, and
+  `bar_flash` (last in the VBI) puts the preset hue at full luminance into
+  COLOR4 for those frames, else black. The border is the only thing the
+  DLI leaves alone, so this costs nothing.
 - **Visual metronome**: during COUNT/REC/DUB (with the grid on) the loop
   row's 16 cells become one bar of 16ths: a bright cell is the current
   step, half cells mark the four beats. It's drawn by the main thread
