@@ -56,8 +56,17 @@ def call(name, a=0, x=0, y=0, limit=200000):
     n = 0
     while m.pc != SENT:
         if m.pc == lbl.get("wait_lcmd"):   # stand in for the VBI taking LCMD
-            if mem[lbl["LCMD"]] == 3:
+            c = mem[lbl["LCMD"]]
+            if c == 3:                     # clear
                 mem[lbl["LSTATE"]] = 0
+                mem[lbl["LBANK"]] = 0
+            elif c == 2:                   # TAB: play from the top / stop
+                if mem[lbl["LSTATE"]] in (2, 3):
+                    mem[lbl["LSTATE"]] = 4
+                else:
+                    mem[lbl["LSTATE"]] = 2
+                    mem[lbl["LPOSLO"]] = mem[lbl["LPOSHI"]] = 0
+                    mem[lbl["LOOPCNT"]] = (mem[lbl["LOOPCNT"]] + 1) & 255
             mem[lbl["LCMD"]] = 0
         m.step()
         n += 1
@@ -376,7 +385,26 @@ for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
     row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 29:0x4000 + 10 * 40 + 39])
     check(row == f"<{name:<8}>", f"  row 10 shows '{row}'")
 tap(Q)
-check(mem[L("DEMOIDX")] == 1, "> wraps back to demo 1")
+check(mem[L("DEMOIDX")] == len(gd.DEMOS) + 1 and mem[L("SONGON")] == 1,
+      "after the last demo, > starts the built-in ANTHEM song")
+row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 29:0x4000 + 10 * 40 + 39])
+check(row == "<ANTHEM  >", f"row 10 shows '{row}'")
+SEC = 64 * 7                             # the song's sections: 64 steps x S=7
+check(w(L("LLENLO")) == SEC and mem[L("LSTATE")] == 2, f"section 1 playing, {w(L('LLENLO'))} frames")
+sc0, bank0 = mem[L("SECTCNT")], mem[L("LBANK")]
+for _ in range(SEC + 4):                 # into the next section
+    frame(); main_frame()
+check(mem[L("SECTCNT")] != sc0 and mem[L("LBANK")] != bank0 and w(L("LLENLO")) == SEC,
+      f"switched to section 2 at the seam (bank {bank0} -> {mem[L('LBANK')]})")
+check(mem[L("SONGON")] == 1 and mem[L("SONGRDY")] == 1, "the next section is already prepared")
+n2 = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "DRUMCNT")]
+for _ in range(SEC): frame(); main_frame()
+got = [(mem[L(x)] - n2[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "DRUMCNT"))]
+check(all(g > 0 for g in got), f"section 2 plays bass/lead/drums {got}")
+tap(BK)
+check(mem[L("SONGON")] == 0 and mem[L("LSTATE")] == 0, "BACKSPACE stops the song")
+tap(Q)
+check(mem[L("DEMOIDX")] == 1, "> then wraps back to demo 1")
 # drums-only toggle (Q) on GROOVE
 MQ = 0x2F
 call("select_preset", a=0)             # player picks PIANO
@@ -406,10 +434,10 @@ for _ in range(w(L("LLENLO"))): frame(); main_frame()
 check((mem[L("NOTE2CNT")] - c[0]) & 255 >= 16 and (mem[L("NOTECNT")] - c[1]) & 255 >= 8,
       "  melodies are back")
 tap(PREV)
-check(mem[L("DEMOIDX")] == len(gd.DEMOS) and w(L("LLENLO")) == gd.DEMOS[-1][1] * gd.DEMOS[-1][2],
-      "< from demo 1 wraps to the last demo")
+check(mem[L("DEMOIDX")] == len(gd.DEMOS) + 1 and mem[L("SONGON")] == 1,
+      "< from demo 1 wraps round to the song")
 tap(PREV)
-check(mem[L("DEMOIDX")] == len(gd.DEMOS) - 1, "< steps back one")
+check(mem[L("DEMOIDX")] == len(gd.DEMOS) and mem[L("SONGON")] == 0, "< steps back to the last demo")
 tap(BK)
 check(mem[L("DEMOIDX")] == 0 and mem[L("LSTATE")] == 0, "BACKSPACE clears the demo")
 for _ in range(3): frame(); main_frame()

@@ -9,7 +9,10 @@ demos.inc: gen_demos.py
 tables.inc: gen_tables.py
 	python3 gen_tables.py
 
-build/synth.xex: synth.s tables.inc demos.inc atari-xex.cfg
+songdata.inc: gen_song.py compose_anthem.py
+	python3 gen_song.py
+
+build/synth.xex: synth.s tables.inc demos.inc songdata.inc atari-xex.cfg
 	@mkdir -p build
 	$(CA65) -g -o build/synth.o synth.s
 	$(LD65) -C atari-xex.cfg -Ln build/synth.lbl -o $@ build/synth.o

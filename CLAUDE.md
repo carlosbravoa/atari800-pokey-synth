@@ -123,6 +123,30 @@ python3 loopfile.py list        #     make loops
   lanes, edit restored, same per-pass playback, and EMPTY refused. It sets
   EDSEL itself, since the editor selection persists across sessions.
 
+## Built-in song (standalone, in the .xex)
+
+Press `>` past the last demo: `<ANTHEM  >` plays the whole 82 s
+arrangement with no PC attached.
+
+- `gen_song.py` writes `songdata.inc`: the five distinct sections in the
+  demos' compact format (929 bytes) plus `song_arr`, the arrangement as
+  (section+1, repeats) pairs ending in 0 (which loops it).
+- The Atari does what songfile.py does from the PC: `song_start` loads the
+  first section into bank 0 and plays it, then `song_prepare` expands the
+  next section into the idle bank. `song_tick` (main thread, from
+  `main_tick`) watches SECTCNT for the VBI's seam switch, advances the
+  arrangement and arms NEXTREQ on the section's last repeat.
+- `load_sect` is the demo loader with a bank: ZBANK `$95` is added in
+  `lane_at`, and `clear_bank` zeroes only that bank's five lanes for the
+  section's length (clearing all 20 KB at a seam would glitch).
+- State: SONGON `$0BAD` .. SONGT1 `$0BB5`. TAB/BKSP/ESC stop the song
+  (`main_tick` notices LSTATE left PLAY).
+- The streamed `.psq` version has one voice more (bar-long fifths): lanes
+  only carry two melodic tracks.
+- **LOMEM is nearly full**: the EXTRA segment ends ~$1BEE against the
+  $1BFF cap (the stream ring starts at $1C00). Move code to MAIN/HIDATA
+  before adding more here.
+
 ## Streamed sequences (.psq) — the PC drives the voices
 
 ```bash
