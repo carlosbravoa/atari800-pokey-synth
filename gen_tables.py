@@ -105,6 +105,19 @@ for c in (0x0E, 0x0F, 0x06, 0x07):          # - = + *  (arrows w/ CTRL)
     kt[c] = 0x30
 L += rows("keytype", kt)
 
+# polyphonic chords. AUTO = one-finger diatonic harmony in C major; black
+# keys give the common borrowed major chords (Db Eb Ab Bb), F# a dim.
+#             C  C# D  D# E  F  F# G  G# A  A# B
+AUTO3 = [4, 4, 3, 4, 3, 4, 3, 4, 4, 3, 4, 3]
+AUTO5 = [7, 7, 7, 7, 7, 7, 6, 7, 7, 7, 7, 6]
+L += rows("auto3", AUTO3)
+L += rows("auto5", AUTO5)
+L += rows("notepc", [n % 12 for n in range(96)])
+# held (POLY) chord tones above the root per CHORD value, $FF = none
+#        OFF   MAJ MIN 7TH OCT   POWER DIM AUTO(table)
+L += rows("poly1", [0xFF, 4, 3, 4, 12, 7, 3, 0])
+L += rows("poly2", [0xFF, 7, 7, 10, 0xFF, 12, 6, 0])
+
 open("tables.inc", "w").write("\n".join(L) + "\n")
 
 # self-check: worst pitch error in cents for each table

@@ -41,6 +41,7 @@ The first key() of a link session is often lost; send a throwaway first.
 | `SPACE` | looper: record -> close loop (plays) -> overdub (drums + melody) <-> play |
 | `TAB` | looper: stop / play from the top |
 | `BACKSPACE` | looper: clear |
+| `R` | held chords on/off for this preset: CHORD = AUTO, CHD SPD = POLY (RETURN restores) |
 | `Q` | drums only: mute the loop's melody tracks (any loop or demo) and keep your own sound |
 | `<` `>` (PC `-` `=`) | built-in demo loops: previous / next (loads + plays; jam or overdub on it) |
 
@@ -71,6 +72,28 @@ Edits are kept per preset (the `live` table) until RETURN.
   SKSTAT bit 2 (held), so notes gate on press and release. New presses are
   posted to the main thread (KEYEV/KEYSEQ). Legato: with GLIDE > 0 a new note
   while sounding keeps the envelope.
+
+## Chords (polyphony without two keys)
+
+- CHORD values: OFF MAJOR MINOR 7TH OCTAVE POWER DIM **AUTO**. AUTO is
+  one-finger diatonic harmony in C major: C Dm Em F G Am B°, and the
+  black keys give Db Eb F#° Ab Bb (tables `auto3`/`auto5` in
+  gen_tables.py).
+- CHD SPD 1-7 arpeggiates the chord on the lead (AUTO walks the key's
+  triad). **CHD SPD 0 = POLY**: the chord sounds held. The lead keeps the
+  root, and `poly_out` puts the two chord tones (`poly1`/`poly2`, or AUTO's
+  third/fifth) on POKEY1 ch3 + ch4. They use the lead's wave (8-bit
+  lay64/buzz64/rasp64) at 3/4 of its envelope, and replace the layer.
+- Channel priority: ch3 yields to the loop's voice 2 (mono, track 1 with
+  melody). ch4 yields to a drum on block 0 for the drum's length: POLY4
+  `$0675` marks a frame where the chord owns ch4, so `drum_one` doesn't
+  silence it.
+- Loop voices ignore POLY (root only) and play AUTO as a MAJOR arpeggio,
+  so the demos are unchanged. Recorded notes replay on the lead through
+  track 2 with that preset's settings, so held chords come back in mono
+  playback.
+- `R` toggles AUTO+POLY on the current preset (kept in `live`, RETURN
+  restores).
 
 ## Looper
 
@@ -116,7 +139,8 @@ Edits are kept per preset (the `live` table) until RETURN.
   between loop wraps (`aligned()`), not over wall-clock windows.
 - VBI order: kb_poll -> loop_step -> synth (lead + layer) -> v2_step -> drum_step.
 - **Code budget**: two load segments. MAIN `$2000-$3BFF` holds code +
-  RODATA, ending ~$37DF (~1 KB free). HIDATA `$4400-$4FFF` holds the pitch
+  RODATA, ending ~$3B7E (**~130 bytes free**; the next feature must first
+  move code into HIDATA, since code runs from any segment). HIDATA `$4400-$4FFF` holds the pitch
   tables and demos, ending ~$4A43 (~1.5 KB free). Don't use `$A000+`: BASIC
   is still mapped when USR-launched from READY.
 

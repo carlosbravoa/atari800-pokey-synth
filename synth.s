@@ -249,6 +249,9 @@ MUTEMEL  = $0671        ; 1 = loop plays drums only (melody tracks muted)
 NOTE3CNT = $0672        ; +1 per slot-1 (track 2, stereo) note-on
 STEREO   = $0673        ; 1 = a second POKEY answers at $D210 (auto-detected)
 LASTSTE  = $0674        ; main: title as drawn
+POLY4    = $0675        ; 1 = a held chord tone owns POKEY1 ch4 this frame
+CH_AUTO  = 7            ; CHORD value: diatonic auto-chord (C major)
+K_R      = $28          ; toggles AUTO held chords on the current preset
 P2       = $10          ; POKEY2 register offset from POKEY1
 RANDOM   = $D20A
 K_Q      = $2F          ; toggles MUTEMEL
@@ -702,6 +705,29 @@ loop_tab:
         lda #2
         sta LCMD
         rts
+toggle_chords:                  ; R: AUTO held chords on/off (this preset)
+        lda P_CHORD
+        cmp #CH_AUTO
+        bne @on
+        lda P_CHDSPD
+        bne @on
+        lda #0                  ; was AUTO+POLY -> chords off
+        ldy #7
+        bne @set
+@on:    lda #CH_AUTO
+        ldy #0
+@set:   sta P_CHORD
+        sty P_CHDSPD
+        ldx PRESET              ; keep it in the live preset (RETURN undoes)
+        ldy pbase,x
+        sta live+8,y
+        lda P_CHDSPD
+        sta live+9,y
+        ldx #8
+        jsr draw_param
+        ldx #9
+        jmp draw_param
+
 toggle_mute:
         lda #5
         sta LCMD
@@ -1482,7 +1508,20 @@ draw_param:                     ; X = param index (clobbers ZT*, ZATTR)
         beq @b8
         cmp #2
         beq @nam
-        jmp @swp
+        cmp #4                  ; CHD SPD: 0 = POLY (held chord)
+        bne @sw0
+        lda ZT3
+        bne @b8
+        ldx #0
+@pt:    lda polytxt,x
+        jsr asc2int
+        sta (ZSCR),y
+        iny
+        inx
+        cpx #4
+        bne @pt
+        jmp @pad
+@sw0:   jmp @swp
 @b16:   ; "NN ffffhooo"
         lda ZT3
         jsr put_2dig
@@ -1919,9 +1958,13 @@ drum_one:                       ; X = block, Y = AUDF register offset
 @v:     ora D_CTL,x
         sta AUDC1,y
         rts
-@off:   lda #0
+@off:   cpx #0                  ; idle live block: a chord tone may own ch4
+        bne @o2
+        lda POLY4
+        bne @o3
+@o2:    lda #0
         sta AUDC1,y
-        rts
+@o3:    rts
 
 ; ---------------------------------------------------------------------------
 ; looper (VBI). Commands arrive through LCMD; lanes are cleared by the main
@@ -2366,6 +2409,8 @@ lv_step:                        ; VBI, X = block
 @x:     rts
 @go:    sty VT2                 ; AUDF register offset
         sta VT3                 ; 1 = 16-bit pair
+        lda V_PAR+9,x           ; CHD SPD 0 = POLY: loop voices play the root
+        beq @na
         lda V_PAR+8,x           ; chord arpeggio
         beq @na
         sta VT0
@@ -2510,6 +2555,8 @@ synth:
         ; ---- chord arpeggio: NOTEIDX = NOTE + chord offset
         ldx P_CHORD
         beq @noarp
+        lda P_CHDSPD            ; POLY: the lead holds the root, the chord
+        beq @noarp              ;  tones sound on ch3/ch4 (poly_out)
         lda ARPTMR
         beq @astep
         dec ARPTMR
@@ -2524,10 +2571,22 @@ synth:
         bcc @ain
         lda #0
         sta ARPPOS
-@ain:   clc
+@ain:   cpx #CH_AUTO
+        beq @aut
+        clc
         adc chord_start,x
         tay
         lda chord_ofs,y
+        jmp @ofs
+@aut:   tay                     ; AUTO: root, third, fifth of NOTE's triad
+        beq @ofs
+        ldx NOTE
+        lda notepc,x
+        tax
+        lda auto3,x
+        dey
+        beq @ofs
+        lda auto5,x
         jmp @ofs
 @noarp: lda #0
 @ofs:   clc
@@ -2829,7 +2888,14 @@ synth:
         txa
         and #31
         sta ECHOPOS
-        jsr v2_owns             ; loop's track 1 has ch3
+        lda #0
+        sta POLY4
+        lda P_CHORD             ; held chord (CHD SPD = POLY) replaces the layer
+        beq @nply
+        lda P_CHDSPD
+        bne @nply
+        jmp poly_out
+@nply:  jsr v2_owns             ; loop's track 1 has ch3
         beq @lyr
         rts
 @lyr:   ldx P_LAYER
@@ -2879,6 +2945,73 @@ synth:
         sta AUDC3
         rts
 
+; held chord: two tones above the lead's root on POKEY1 ch3 + ch4, in the
+; lead's wave (8-bit tables) at 3/4 of its envelope. ch3 yields to the
+; loop's voice 2, ch4 to any drum on block 0.
+poly_out:
+        ldx P_CHORD
+        cpx #CH_AUTO
+        bne @fix
+        ldy NOTE
+        ldx notepc,y
+        lda auto3,x
+        sta VT0
+        lda auto5,x
+        jmp @t
+@fix:   lda poly1,x
+        sta VT0
+        lda poly2,x
+@t:     sta VT1
+        lda VOLHI
+        lsr a
+        lsr a
+        sta VT4
+        lda VOLHI
+        sec
+        sbc VT4
+        ldx P_WAVE
+        ora wavebits,x
+        sta VT4                 ; AUDC for both tones
+        jsr v2_owns
+        bne @t2
+        lda VT0
+        jsr poly_pitch
+        sta AUDF3
+        lda VT4
+        sta AUDC3
+@t2:    lda VT1
+        cmp #$FF
+        beq @x
+        lda D_TMR
+        bne @x
+        lda VT1
+        jsr poly_pitch
+        sta AUDF4
+        lda VT4
+        sta AUDC4
+        lda #1
+        sta POLY4
+@x:     rts
+
+poly_pitch:                     ; A = semitones above NOTE -> 8-bit AUDF
+        clc
+        adc NOTE
+        cmp #96
+        bcc @k
+        lda #95
+@k:     tay
+        lda P_WAVE
+        cmp #1
+        beq @bz
+        cmp #3
+        beq @rs
+        lda lay64,y
+        rts
+@bz:    lda buzz64,y
+        rts
+@rs:    lda rasp64,y
+        rts
+
 ; ---------------------------------------------------------------------------
 ; DLI: piano colors for rows 3-7, GR.0 colors again from row 8
 dli:
@@ -2921,8 +3054,8 @@ dli:
 ; waveform AUDC distortion bits: PURE BUZZ GRIT RASP NOISE HISS
 wavebits:   .byte $A0,$C0,$40,$20,$80,$00
 
-chord_start: .byte 0, 0,3,6,10,12,15
-chord_len:   .byte 1, 3,3,4,2,3,3
+chord_start: .byte 0, 0,3,6,10,12,15, 0   ; AUTO: lead uses auto3/5; loop
+chord_len:   .byte 1, 3,3,4,2,3,3, 3   ;  voices arpeggiate it as MAJOR
 chord_ofs:   .byte 0,4,7, 0,3,7, 0,4,7,10, 0,12, 0,7,12, 0,3,6
 
 layofs:     .byte <-12, 7, 12, 0        ; SUB FIFTH OCT-UP CHORUS
@@ -2942,14 +3075,14 @@ dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
-            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT,K_Q
-NCMD = 14
+            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT,K_Q,K_R
+NCMD = 15
 cmdlo:      .byte <(oct_down-1),<(oct_up-1),<(ed_up-1),<(ed_down-1)
             .byte <(ed_left-1),<(ed_right-1),<(reset_preset-1),<(hush-1)
-            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(prev_demo-1),<(next_demo-1),<(toggle_mute-1)
+            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(prev_demo-1),<(next_demo-1),<(toggle_mute-1),<(toggle_chords-1)
 cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
-            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1),>(toggle_mute-1)
+            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1),>(toggle_mute-1),>(toggle_chords-1)
 lsnames:    .byte "EMPTYREC  PLAY DUB  STOP DRUMS"
 titlewords: .byte "8-BIT KEYBOARDSTEREO 2-POKEY"
 qdemotxt:   .byte "< DEMOS  >"
@@ -2989,14 +3122,15 @@ factory:
 ; editor: labels (8), value types (0 bar16, 1 bar8, 2 names, 3 sweep)
 plabels:    .byte "WAVE    ATTACK  DECAY   SUSTAIN RELEASE LAYER   "
             .byte "VIBRATO VIB SPD CHORD   CHD SPD SWEEP   GLIDE   "
-ptype:      .byte 2,0,0,0,0,2, 1,1,2,1,3,1
-pmin:       .byte 0,0,0,0,0,0, 0,1,0,1,0,0
-pmax:       .byte 5,15,15,15,15,5, 7,7,6,7,14,7
+ptype:      .byte 2,0,0,0,0,2, 1,1,2,4,3,1
+pmin:       .byte 0,0,0,0,0,0, 0,1,0,0,0,0
+pmax:       .byte 5,15,15,15,15,5, 7,7,7,7,14,7
 pnlist_lo:  .byte <wavenm,0,0,0,0,<laynm, 0,0,<chordnm,0,0,0
 pnlist_hi:  .byte >wavenm,0,0,0,0,>laynm, 0,0,>chordnm,0,0,0
 wavenm:     .byte "PURE  BUZZ  GRIT  RASP  NOISE HISS  "
 laynm:      .byte "OFF   SUB   FIFTH OCT UPCHORUSECHO  "
-chordnm:    .byte "OFF   MAJOR MINOR 7TH   OCTAVEPOWER DIM   "
+chordnm:    .byte "OFF   MAJOR MINOR 7TH   OCTAVEPOWER DIM   AUTO  "
+polytxt:    .byte "POLY"
 swtxt:      .byte "DOWN UP   OFF  "
 
 static_text:
@@ -3004,7 +3138,7 @@ static_text:
         .byte 9,1,0, "NOTE",0
         .byte 9,12,0, "VOLUME",0
         .byte 11,1,0, "DRUMS",0
-        .byte 15,21,0, "Q=DRUMS  ESC=HUSH",0
+        .byte 15,21,0, "R=CHORDS  Q=DRUMS",0
         .byte 16,1,$80, "SOUND EDITOR",0
         .byte 16,14,0, "ARROWS/STICK  RET=RESET",0
         .byte 10,1,0, "LOOP",0

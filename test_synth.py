@@ -454,6 +454,40 @@ mem[0xD21F] = 0x04
 for _ in range(20): frame()
 tap(BK)
 
+# 13. held chords: R = AUTO + POLY on the current preset
+RK, DK, GK = 0x28, 0x3A, 0x3D           # R, D (E), G (G)
+call("select_preset", a=0)
+tap(RK)
+check(mem[L("P_CHORD")] == 7 and mem[L("P_CHDSPD")] == 0, "R -> CHORD AUTO, CHD SPD POLY")
+ed = lambda r, c: "".join(chr((ch & 0x7F) + 32) for ch in mem[0x4000 + r * 40 + c:0x4000 + r * 40 + c + 6])
+check(ed(19, 29) == "AUTO  " and ed(20, 29).startswith("POLY"), f"editor shows '{ed(19, 29)}' / '{ed(20, 29)}'")
+lay = lambda n: mem[L("lay64") + n]
+for key, root, t3, t5, nm in ((A, 36, 40, 43, "C major"), (DK, 40, 43, 47, "E minor"),
+                              (GK, 43, 47, 50, "G major")):
+    for _ in range(3): frame(key)
+    check(mem[L("NOTE")] == root and mem[L("NOTEIDX")] == root and mem[0xD204] == lay(t3)
+          and mem[0xD206] == lay(t5) and mem[0xD205] & 0x0F > 5 and mem[0xD207] & 0x0F > 5,
+          f"{nm}: lead {root}, ch3 {t3}, ch4 {t5} sounding together")
+    for _ in range(30): frame()
+for _ in range(3): frame(A)
+frame(C)                                # kick takes ch4
+check(mem[0xD207] & 0xF0 == 0x80 or mem[0xD207] & 0xF0 == 0xC0, "a drum hit takes ch4 over the chord")
+for _ in range(20): frame(A)
+check(mem[0xD206] == lay(43) and mem[0xD207] & 0x0F > 0, "the fifth returns to ch4 after the drum")
+for _ in range(30): frame()
+check(mem[0xD207] & 0x0F == 0 and mem[0xD205] & 0x0F == 0, "released chord goes silent")
+tap(RK)
+check(mem[L("P_CHORD")] == 0 and mem[L("P_CHDSPD")] == 7, "R again -> chords off")
+# AUTO as an arpeggio (speed > 0) walks the diatonic triad
+mem[L("P_CHORD")] = 7; mem[L("P_CHDSPD")] = 7
+seq = []
+for _ in range(8):
+    frame(DK); seq.append(mem[L("NOTEIDX")] - 40)
+check(set(seq) == {0, 3, 7}, f"AUTO arpeggio on E: offsets {sorted(set(seq))}")
+for _ in range(30): frame()
+mem[L("P_CHORD")] = 0
+tap(0x0C)                               # RETURN: factory PIANO
+
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):
     call("select_preset", a=p)
