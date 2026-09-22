@@ -3344,15 +3344,15 @@ dr_seq:     .byte  2,  0,  0,  0,  0,  0,  0,  0     ; script index (0 = envelop
 ; pitch and volume.
 drseq:      .byte 0
             .byte $00,$1F       ; volume-only 15: the speaker "pop"
-            .byte $D0,$CF       ; poly4 thud, starting deep and falling to the
-            .byte $E0,$CF       ;  lowest AUDF, with a longer tail (10 frames;
-            .byte $E8,$CE       ;  tag kick-v2-pop-thud = the 6-frame version)
-            .byte $F0,$CC
-            .byte $F4,$CA
-            .byte $F8,$C8
-            .byte $FC,$C6
-            .byte $FF,$C4
-            .byte $FF,$C2
+            .byte $C0,$CF       ; poly4 thud falling C0 -> F8 (the audible range
+            .byte $C8,$CF       ;  of tag kick-v2-pop-thud) over a 10-frame body;
+            .byte $D0,$CE       ;  AUDF D0-FF was deeper but too quiet to hear
+            .byte $D8,$CC
+            .byte $E0,$CA
+            .byte $E8,$C8
+            .byte $F0,$C6
+            .byte $F4,$C4
+            .byte $F8,$C2
             .byte $00,$00
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC

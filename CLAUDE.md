@@ -77,9 +77,10 @@ Edits are kept per preset (the `live` table) until RETURN.
 - **Scripted drums**: a drum with `dr_seq` != 0 plays `drseq` frame by
   frame, as (AUDF, AUDC) pairs with AUDC 0 ending it, instead of the
   envelope. The kick is the classic POKEY "battery kick": a volume-only
-  `$1F` DC pop, then poly4 `$CF` -> `$C2` at AUDF `$D0`-`$FF` (falling to
-  the lowest divider), 10 frames total. The shorter 6-frame version
-  (`$C0`-`$F8`) is git tag `kick-v2-pop-thud`. The recipe's pure-tone "beater" frame (`$AF`, AUDF
+  `$1F` DC pop, then 9 frames of poly4 `$CF` -> `$C2` at AUDF `$C0`-`$F8`
+  (falling), 10 frames total. Tried and rejected: AUDF `$D0`-`$FF` (deeper
+  but too quiet to hear). Tag `kick-v2-pop-thud` = the earlier 6-frame
+  version. The recipe's pure-tone "beater" frame (`$AF`, AUDF
   `$20`) was dropped: at 64 kHz it's a ~1 kHz beep that sounds like a
   keyclick. Tweak
   the table to reshape it. The old swept-buzz kick values are still in
