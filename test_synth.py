@@ -204,12 +204,13 @@ for _ in range(60):
 # 6. drums: kick sweeps AUDF4 upward, counts, lights
 frame(C)
 kick = [(mem[0xD206], mem[0xD207])]
-for _ in range(7):
+for _ in range(11):
     frame(C)
     kick.append((mem[0xD206], mem[0xD207]))
-want = [(0x00, 0x1F), (0xC0, 0xCF), (0xD0, 0xCF), (0xE0, 0xCB), (0xF0, 0xC8), (0xF8, 0xC4)]
-check(mem[L("DRUMCNT")] == 1 and kick[:6] == want and kick[6][1] == 0,
-      f"battery kick script: {[f'{f:02X}/{c:02X}' for f, c in kick[:7]]}")
+want = [(0x00, 0x1F), (0xD0, 0xCF), (0xE0, 0xCF), (0xE8, 0xCE), (0xF0, 0xCC), (0xF4, 0xCA),
+        (0xF8, 0xC8), (0xFC, 0xC6), (0xFF, 0xC4), (0xFF, 0xC2)]
+check(mem[L("DRUMCNT")] == 1 and kick[:10] == want and kick[10][1] == 0,
+      f"battery kick script: {[f'{f:02X}/{c:02X}' for f, c in kick[:11]]}")
 main_frame()
 for _ in range(20):
     frame()

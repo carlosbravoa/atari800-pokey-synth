@@ -3344,11 +3344,15 @@ dr_seq:     .byte  2,  0,  0,  0,  0,  0,  0,  0     ; script index (0 = envelop
 ; pitch and volume.
 drseq:      .byte 0
             .byte $00,$1F       ; volume-only 15: the speaker "pop"
-            .byte $C0,$CF       ; poly4, falling: the shell thud (no pure-tone
-            .byte $D0,$CF       ;  "beater" frame: at AUDF $20 it's a ~1 kHz beep)
-            .byte $E0,$CB
-            .byte $F0,$C8       ; sub-bass tail
-            .byte $F8,$C4
+            .byte $D0,$CF       ; poly4 thud, starting deep and falling to the
+            .byte $E0,$CF       ;  lowest AUDF, with a longer tail (10 frames;
+            .byte $E8,$CE       ;  tag kick-v2-pop-thud = the 6-frame version)
+            .byte $F0,$CC
+            .byte $F4,$CA
+            .byte $F8,$C8
+            .byte $FC,$C6
+            .byte $FF,$C4
+            .byte $FF,$C2
             .byte $00,$00
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
