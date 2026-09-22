@@ -4223,6 +4223,9 @@ pokey_out:
         bpl @p1
         lda STEREO
         beq @x
+        lda STREAMON            ; a PC stream or the built-in song owns
+        ora SONGON              ;  POKEY2's voices: don't mirror over them
+        bne @loop
         lda LSTATE
         cmp #LS_PLAY
         beq @loop

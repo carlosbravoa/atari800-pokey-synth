@@ -132,12 +132,68 @@ def part(mid, tracks, prefer, second=False):
     return m2p.mono_events(rest, prefer=prefer) if rest else []
 
 
+# GM instrument families, by program number: what a channel is FOR says
+# more about its role than its register does.
+def family(prog):
+    if prog is None:
+        return "?"
+    if 32 <= prog <= 39:
+        return "bass"
+    if 80 <= prog <= 87 or 72 <= prog <= 79 or 64 <= prog <= 71:
+        return "lead"                    # synth lead, pipe, reed
+    if 56 <= prog <= 63 or 24 <= prog <= 31 or 0 <= prog <= 7:
+        return "melodic"                 # brass, guitar, piano
+    if 48 <= prog <= 55 or 88 <= prog <= 95 or 40 <= prog <= 47:
+        return "pad"                     # strings, ensemble, pads
+    return "other"
+
+
+class Stat:
+    """one track/channel, with everything the picker needs"""
+
+    def __init__(self, spec, ns, prog):
+        self.spec, self.prog = spec, prog
+        self.family = family(prog)
+        self.n = len(ns)
+        self.mean = sum(n for n, _, _ in ns) / self.n
+        self.first = min(s for _, s, _ in ns)
+        self.last = max(e for _, _, e in ns)
+        self.drum = spec.endswith(f":{DRUM_CH + 1}")
+        span = max(1e-6, self.last - self.first)
+        self.dens = self.n / span                      # notes per second
+        # how much of the time more than one note sounds (a pad holds chords,
+        # a melody does not)
+        pts = sorted([(s, 1) for _, s, _ in ns] + [(e, -1) for _, _, e in ns])
+        live = poly = 0.0
+        cur, prev = 0, pts[0][0]
+        for t, d in pts:
+            if cur > 0:
+                live += t - prev
+                if cur > 1:
+                    poly += t - prev
+            cur += d
+            prev = t
+        self.poly = poly / live if live else 0.0
+        self.active = live / span
+        # melodies move in small steps; basses and arpeggios leap
+        top = sorted(ns, key=lambda e: (e[1], -e[0]))
+        seq = [n for n, _, _ in top]
+        steps = [abs(b - a) for a, b in zip(seq, seq[1:])] or [12]
+        self.step = sum(steps) / len(steps)
+
+
 def channel_stats(mid, start=0.0, end=0.0):
-    """[(spec, notes, mean pitch, first, last, is_drum)] per track/channel,
-    counted only inside the window that is actually being converted"""
+    """Stat per track/channel, inside the window being converted"""
     out = []
     for i in range(len(mid.tracks)):
-        per = {}
+        per, prog, t = {}, {}, 0
+        cur = {}
+        for msg in mid.tracks[i]:
+            if msg.type == "program_change":
+                cur[msg.channel] = msg.program
+            elif msg.type == "note_on" and msg.velocity > 0:
+                ch = getattr(msg, "channel", 0)
+                prog.setdefault(ch, cur.get(ch))
         for n, c, s0, s1 in raw_notes(mid, i):
             if end and s0 >= end:
                 continue
@@ -145,70 +201,103 @@ def channel_stats(mid, start=0.0, end=0.0):
                 continue
             per.setdefault(c, []).append((n, s0, s1))
         for c, ns in per.items():
-            out.append((f"{i + 1}:{c + 1}", len(ns),
-                        sum(n for n, _, _ in ns) / len(ns),
-                        min(s for _, s, _ in ns), max(e for _, _, e in ns),
-                        c == DRUM_CH))
+            out.append(Stat(f"{i + 1}:{c + 1}", ns, prog.get(c)))
     return out
 
 
 def auto_pick(mid, start=0.0, end=0.0):
     """Pick lead / bass / harmony / drums from the file itself.
 
-    Each role wants a register AND a part that actually plays: a sparse
-    8-note line in the cellar is not the bass, and the highest sparkle is
-    not the tune. Roles are then filled out with other parts in the same
-    register that cover the stretches the first one is silent for, because
-    arrangements hand a part between instruments.
+    The lead is the part that behaves like a tune: a melody instrument,
+    mostly one note at a time, busy, moving in steps rather than leaps, and
+    playing through the piece. Picking by register alone kept landing on
+    the second voice - a counter-line or a pad sitting above the melody.
     """
     st = channel_stats(mid, start, end)
-    drums = [x[0] for x in st if x[5]]
-    mel = [x for x in st if not x[5] and x[1] >= 8]
+    drums = [x.spec for x in st if x.drum]
+    mel = [x for x in st if not x.drum and x.n >= 8]
     if not mel:
         return "", "", "", ",".join(drums)
-    span = max(x[4] for x in mel) - min(x[3] for x in mel) or 1
+    span = max(x.last for x in mel) - min(x.first for x in mel) or 1
+    cover = lambda x: (x.last - x.first) / span
 
-    def cover(x):
-        return (x[4] - x[3]) / span
+    # Weights tuned against files rated on the real machine (see
+    # songs/ratings.md). What actually identifies a tune: it plays one note
+    # at a time, it moves in steps of a tone or two (a mean step under ~1
+    # semitone is a repeated-note ostinato, over ~8 is an arpeggio or a
+    # bass), and it is sounding most of the time. The GM instrument label
+    # is only a hint: game rips put melodies on "bass" programs.
+    def fam_hint(x, want):
+        return {"lead": 1.0, "melodic": 1.0, "other": 0.3, "?": 0.3,
+                "pad": 0.0, "bass": -0.5}[x.family] if want == "lead" else 0.0
 
-    def pick(pool, centre, low=False):
-        def score(x):
-            reg = max(0, x[2] - centre) / 6 if low else abs(x[2] - centre) / 8
-            return cover(x) * 4 + x[1] / 150 - reg
-        return max(pool, key=score) if pool else None
+    def step_fit(x):
+        if x.step < 1.0:
+            return -1.2                          # repeated notes: an ostinato
+        if x.step <= 6.0:
+            return 1.5                           # stepwise: a tune
+        return 0.3 if x.step <= 9.0 else 0.0     # leaps: arpeggio or bass
 
-    lead = pick(mel, 72)
+    def lead_score(x):
+        # note count, not "how much of the time it sounds": in the rated
+        # set the busiest-sounding channel was wrong in both directions
+        return (2.0 * (1.0 - x.poly) + 1.2 * min(x.n, 150) / 150
+                + 0.8 * min(x.dens, 6) / 6 + step_fit(x)
+                + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 25)
+
+    def bass_score(x):
+        fam = {"bass": 1.2, "melodic": 0.2, "other": 0.2, "?": 0.2,
+               "pad": -0.3, "lead": -0.5}[x.family]
+        return (fam + 1.5 * x.active + 1.5 * (1.0 - x.poly)
+                - max(0, x.mean - 50) / 6)
+
+    def harm_score(x):
+        fam = {"pad": 1.0, "melodic": 0.6, "lead": 0.5, "other": 0.3,
+               "?": 0.3, "bass": -1.0}[x.family]
+        return fam + 1.5 * x.active - abs(x.mean - 66) / 14
+
+    lead = max(mel, key=lead_score)
+    if lead.poly > 0.5:                  # a chord channel: its top line is a
+        alt = [x for x in mel            #  harmony, so prefer a real single
+               if x is not lead and x.poly < 0.2 and step_fit(x) > 0
+               and x.n >= 0.25 * lead.n and x.mean >= 52
+               and x.family not in ("bass",)]
+        if alt:
+            lead = max(alt, key=lead_score)
     rest = [x for x in mel if x is not lead]
-    bass = pick(rest, 45, low=True)
+    bass = max(rest, key=bass_score) if rest else None
     rest = [x for x in rest if x is not bass]
-    harm = pick(rest, 64)
+    harm = max(rest, key=harm_score) if rest else None
 
     def relay(seed, pool):
+        """arrangements hand a part between instruments: fill the seed's
+        silent stretches with same-register parts"""
         chosen = [seed]
-        for c in sorted(pool, key=lambda x: -x[1]):
-            if abs(c[2] - seed[2]) > 8:
+        for c in sorted(pool, key=lambda x: -x.n):
+            if abs(c.mean - seed.mean) > 8 or c.family != seed.family:
                 continue
-            overlap = any(min(c[4], x[4]) - max(c[3], x[3]) > 0.5 * (c[4] - c[3])
-                          for x in chosen)
-            if not overlap:
-                chosen.append(c)
+            if any(min(c.last, x.last) - max(c.first, x.first) > 0.5 * (c.last - c.first)
+                   for x in chosen):
+                continue
+            chosen.append(c)
         return chosen
 
-    used = {x[0] for x in (lead, bass, harm) if x}
-    free = lambda: [x for x in mel if x[0] not in used]
+    used = {x.spec for x in (lead, bass, harm) if x}
+    free = lambda: [x for x in mel if x.spec not in used]
     leads = relay(lead, free()) if lead else []
-    used |= {x[0] for x in leads}
+    used |= {x.spec for x in leads}
     basses = relay(bass, free()) if bass else []
-    used |= {x[0] for x in basses}
+    used |= {x.spec for x in basses}
     harms = relay(harm, free()) if harm else []
     print("auto-picked parts (override with --lead/--bass/--harm/--drums):")
     for nm, xs in (("lead", leads), ("bass", basses), ("harmony", harms)):
         for k, x in enumerate(xs):
-            print(f"  {(nm if k == 0 else ' + also'):8s} {x[0]:6s} {x[1]:4d} notes, "
-                  f"mean midi {x[2]:.0f}, {x[3]:.0f}-{x[4]:.0f}s")
+            print(f"  {(nm if k == 0 else ' + also'):8s} {x.spec:6s} {x.n:4d} notes, "
+                  f"midi {x.mean:.0f}, {x.dens:.1f}/s, {int(x.poly * 100):2d}% chords, "
+                  f"step {x.step:.1f}, {x.family}")
     if drums:
         print(f"  drums    {','.join(drums)}")
-    j = lambda xs: ",".join(x[0] for x in xs)
+    j = lambda xs: ",".join(x.spec for x in xs)
     return j(leads), j(basses), j(harms), ",".join(drums)
 
 

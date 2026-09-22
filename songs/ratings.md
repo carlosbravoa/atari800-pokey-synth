@@ -1,5 +1,13 @@
 # MIDI conversion ratings (1 bad - 5 great)
 
+**The ratings below were taken with a bug: in stereo, `pokey_out` mirrored
+POKEY1 onto POKEY2 whenever the looper wasn't playing, which included
+streamed (.psq) and built-in-song playback — so the bass and harmony were
+overwritten every frame and only the lead + drums were audible.** Fixed
+2026-09-22 (STREAMON/SONGON now count as "POKEY2 is in use"). Everything
+below therefore rates a one-voice rendering, not the conversion; re-rate
+before drawing conclusions about the part picker.
+
 Rated by Carlos on the real machine, to find where the auto-pick heuristic
 fails. Coverage is what `midi2psq.py` reported at conversion time.
 

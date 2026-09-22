@@ -440,14 +440,19 @@ it switches to expanded mode by itself:
   switched off), so STEREO drops to 0. Switching stereo ON mid-session is
   picked up by the next ESC.
 - The title shows `STEREO 2-POKEY` in place of `8-BIT KEYBOARD`.
-- **Solo mirror**: whenever POKEY2 isn't carrying a loop (EMPTY, REC,
-  STOP), `pokey_out` mirrors POKEY1 onto it: layer, chord tones and drums
+- **Solo mirror**: whenever POKEY2 isn't carrying a loop **or a stream or
+  the built-in song** (STREAMON/SONGON/PLAY/DUB), `pokey_out` mirrors
+  POKEY1 onto it: layer, chord tones and drums
   identical, and the lead's period + period/256 (~7 cents flat on the
   right). The result is a centered, slightly wide chorus for solo playing.
   BUZZ/RASP get no detune: the pitch of these poly waves needs
   gcd(period+7, 15 or 31) = 1, and period + period/256 broke that for
   most BASS/SYNTH keys (C2 silent, others 2-3 octaves up on the right).
-  In PLAY/DUB, POKEY2 carries the loop as before. Only the sound changes;
+  In PLAY/DUB — and while STREAMON or SONGON is set — POKEY2 carries its
+  own voices. **Miss one of those and the mirror silently overwrites the
+  loop voices every frame**: streamed 3-part music played as lead + drums
+  only (found 2026-09-22 by A/B-ing a phrase on each POKEY; the register
+  image looked right because the engines write it *before* pokey_out). Only the sound changes;
   recording stores notes, not registers.
 - **Register image**: the VBI engines (synth, poly_out, lv_step, drum_one)
   never write POKEY directly. They write the 32-byte image `SH` at `$0B78`
