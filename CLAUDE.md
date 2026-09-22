@@ -165,6 +165,20 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$3C00-$3FFF` | RAM charset (ROM font + piano/meter glyphs on lowercase codes) |
 | `$4000-$43BF` | screen |
 
+## Demo loop
+
+`python3 demo_loop.py` pokes a 2-bar loop straight into the lanes and starts
+it: a BASS line on voice 2, a FLUTE melody on the lead, and a kick/snare/hat
+pattern. It's the quickest way to hear the looper. TAB and BACKSPACE control
+it like a recorded loop.
+
+## Open issue (2026-09-22)
+
+One cold USR launch hung: black screen, FRAME stuck at 1. It happened after
+the user pressed RESET on a running synth by mistake. A fresh reboot and
+redeploy worked, and a py65 cold start with dirty RAM runs clean. If it
+recurs, dump `$0600-$06FF` and the code range before resetting.
+
 ## Not verified by machine
 
 Timbre is judged by ear, and the agent can't hear. Drum voicings and preset
