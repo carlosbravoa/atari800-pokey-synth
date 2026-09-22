@@ -34,6 +34,9 @@ The first key() of a link session is often lost; send a throwaway first.
 | `RETURN` | restore the current preset's factory sound |
 | `ESC` | silence |
 | OPTION / SELECT (F8/F7) | next / previous preset |
+| `SPACE` | looper: record -> close loop (plays) -> overdub drums <-> play |
+| `TAB` | looper: stop / play from the top |
+| `BACKSPACE` | looper: clear |
 
 Edits are kept per preset (the `live` table) until RETURN.
 
@@ -63,11 +66,43 @@ Edits are kept per preset (the `live` table) until RETURN.
   posted to the main thread (KEYEV/KEYSEQ). Legato: with GLIDE > 0 a new note
   while sounding keeps the envelope.
 
+## Looper
+
+- **Per-frame lanes**, one byte per frame, max 4096 frames (~68 s):
+  MLANE `$5000` (0 none, 1-96 note-on n+1, `$FE` note-off), DLANE `$6000`
+  (drum d+1), PLANE `$7000` (preset p+1; frame 0 = the loop's starting
+  sound). Overdubbing drums just stamps DLANE at LPOS, so nothing needs
+  merging. The second-voice melody overdub (next phase) can use the same shape.
+- States (LSTATE): EMPTY -> SPACE -> REC -> SPACE -> PLAY <-> SPACE <-> DUB;
+  TAB = STOP/PLAY; BKSP = EMPTY; ESC also stops. A loop under 30 frames
+  cancels. The 4096 cap auto-closes it. A key held at close gets a note-off
+  on the last frame.
+- Main thread posts commands through `LCMD`. The VBI executes them, so the
+  multi-byte loop state is only ever written in the VBI. Lanes are cleared by
+  the main thread on SPACE-from-EMPTY, while the VBI isn't touching them.
+- Live events are captured in the VBI (`LIVEM`/`LIVED`) and by
+  `select_preset` (`LIVEP`), then written by `loop_step` in REC/DUB. In
+  playback a live drum hit wins its frame. A held live key keeps its note
+  over loop note-offs. Playback preset changes go to the main thread
+  (`PRESREQ`) and keep the player's octave.
+- VBI order: kb_poll -> loop_step -> synth -> drum_step.
+- **ZP exception**: the VBI uses `$F0-$F1` (`VP`) as its lane pointer, the
+  same documented exception as the tetris music engine.
+- `hwloop.py` runs the full record/replay/overdub/stop/clear cycle with real
+  HID keys and checks lanes and counters.
+
+## Later: dual POKEY
+
+The board has an OSD-toggled stereo second POKEY (`$D210`, right channel).
+Plan: an in-program toggle, only when detected, that moves the looper's
+voices (or a second melodic voice) onto POKEY2. That lifts the
+four-channel limit on overdubbing melody over melody.
+
 ## Screen
 
 Row 0 title+octave · row 1 mode-7 preset name (PF0 = preset hue) · row 2
 black-key labels · rows 3-7 mode-4 piano · row 8 white-key labels · row 9
-note + volume meter · rows 11-12 drums · 13-15 presets · 16 editor header ·
+note + volume meter · row 10 loop state + progress · rows 11-12 drums · 13-15 presets · 16 editor header ·
 17-22 editor · 23 help. A DLI (keyed off VCOUNT) swaps PF0-3 to piano colors
 for rows 3-7 and restores GR.0 colors after. Piano glyphs sit on lowercase
 codes, so `screen` dumps read `w x b d` (unlit) / `c e` (lit black key).
@@ -86,6 +121,9 @@ $061D-21 drum engine  $0622 DRUMLIT  $0623 NOTECNT  $0624 DRUMCNT
 $0625 KEYCNT  $0627 GATE  $0630-3B PARAMS (live sound)  $063D PARKREQ
 $0643 UICNT (main-loop liveness)  $0644 DCLK
 $0645 LOGPOS  $0646 LOGN  $0647 LASTKB  $0648 LASTSK
+$0649 LSTATE 0 empty 1 rec 2 play 3 dub 4 stop  $064A LCMD
+$064B/4C LPOS  $064D/4E LLEN  $064F LCELL (bar 0-16)
+$0652-54 LIVEM/LIVED/LIVEP  $0655 PRESREQ  $0658 LOOPCNT (+1 per wrap)
 $0A40-$0B3F key logger: 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C),
   written by wait_frame on every raw register change (sk $08 = key down,
   $0C = up; bit 3 = shift). Read it after a real-keyboard test.
@@ -100,6 +138,9 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$0600-$0643` | state (above) |
 | `$0680-$0690` | hot-swap trampoline + RTI stub |
 | `$0A00-$0A3F` | echo ring |
+| `$0A40-$0B3F` | key logger |
+| `$5000-$7FFF` | looper lanes (melody, drums, preset) |
+| `$F0-$F1` | VBI lane pointer (ZP exception) |
 | `$2000-$3BFF` | code + data (MAIN cap) |
 | `$3C00-$3FFF` | RAM charset (ROM font + piano/meter glyphs on lowercase codes) |
 | `$4000-$43BF` | screen |

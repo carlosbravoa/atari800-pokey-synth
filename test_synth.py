@@ -89,6 +89,7 @@ assert list(mem[li:li + 130]) == list(mem[fa:fa + 130]), "factory->live copy"
 for n in ("HELD", "LITKEY", "DRUMLIT", "LASTDRUM", "DISPNOTE", "PREVCON"):
     mem[L(n)] = 0xFF
 mem[L("PREVSTK")] = 0x0F
+mem[L("PRESREQ")] = 0xFF
 mem[0xD20F] = 0x04          # SKSTAT: no key
 call("cls")
 call("print_list", a=L("static_text") & 255, x=L("static_text") >> 8)
@@ -105,16 +106,14 @@ def frame(key=None):
         mem[0xD20F] = 0x00
         mem[0xD209] = key
     call("kb_poll")
+    call("loop_step")
     call("synth")
     call("drum_step")
     return w(L("OUTLO")), mem[L("VOLHI")], mem[L("ESTATE")]
 
 
 def main_frame():
-    if mem[L("KEYSEQ")] != mem[L("LASTSEQ")]:
-        mem[L("LASTSEQ")] = mem[L("KEYSEQ")]
-        call("handle_key", a=mem[L("KEYEV")])
-    call("ui_update")
+    call("main_tick")
 
 
 F = 1789772.5
@@ -229,6 +228,74 @@ frame(); check(mem[L("NOTECNT")] == n0 + 1 and mem[L("GATE")] == 1, "REMKEY play
 for _ in range(12):
     frame()
 check(mem[L("GATE")] == 0, "REMHOLD expiry releases it")
+
+# 9. looper: record a note + a kick, close, replay, overdub a snare
+SP, TAB, BK, V = 0x21, 0x2C, 0x34, 0x10
+call("select_preset", a=0)
+for _ in range(5):
+    frame()
+tap = lambda k: (frame(k), main_frame(), frame(), main_frame())
+tap(SP)
+check(mem[L("LSTATE")] == 1, "SPACE starts recording")
+t0 = w(L("LPOSLO"))
+for _ in range(10): frame()
+for _ in range(12): frame(A)            # note held 12 frames
+for _ in range(20): frame()
+frame(C); frame()                       # kick
+for _ in range(40): frame()
+tap(SP)
+LL = w(L("LLENLO"))
+check(mem[L("LSTATE")] == 2 and 80 < LL < 100, f"SPACE closes the loop: {LL} frames, playing")
+ml = [mem[L("MLANE") + i] for i in range(LL)]
+dl = [mem[L("DLANE") + i] for i in range(LL)]
+on = [i for i, v in enumerate(ml) if 0 < v < 0xFE]
+off = [i for i, v in enumerate(ml) if v == 0xFE]
+kick = [i for i, v in enumerate(dl) if v]
+check(len(on) == 1 and ml[on[0]] == 37 and len(off) == 1 and off[0] - on[0] == 12,
+      f"melody lane: on@{on} (C4) off@{off}")
+check(len(kick) == 1 and dl[kick[0]] == 1, f"drum lane: kick@{kick}")
+check(mem[L("PLANE")] == 1, "preset lane: PIANO at frame 0")
+# play one pass: note and kick fire at their recorded frames
+n0, d0 = mem[L("NOTECNT")], mem[L("DRUMCNT")]
+while w(L("LPOSLO")) != 0: frame(); main_frame()
+fired = {}
+for f in range(LL):
+    a, b = mem[L("NOTECNT")], mem[L("DRUMCNT")]
+    frame(); main_frame()
+    if mem[L("NOTECNT")] != a: fired.setdefault("note", f)
+    if mem[L("DRUMCNT")] != b: fired.setdefault("kick", f)
+check(fired.get("note") == on[0] and fired.get("kick") == kick[0],
+      f"playback fires at the recorded frames {fired}")
+check(mem[L("LOOPCNT")] >= 2 and mem[L("LCELL")] <= 1, "loop wrapped, bar restarted")
+# overdub a snare
+tap(SP)
+check(mem[L("LSTATE")] == 3, "SPACE while playing = overdub")
+for _ in range(5): frame()
+sn = w(L("LPOSLO"))
+frame(V); frame()
+tap(SP)
+check(mem[L("LSTATE")] == 2, "SPACE again = back to play")
+dl = [mem[L("DLANE") + i] for i in range(LL)]
+check(sorted(v for v in dl if v) == [1, 2], f"drum lane now kick + snare {[(i, v) for i, v in enumerate(dl) if v]}")
+d0 = mem[L("DRUMCNT")]
+for _ in range(LL): frame(); main_frame()
+check(mem[L("DRUMCNT")] - d0 == 2, "a full pass plays both drums")
+# octave survives the loop's preset event
+frame(0x16); main_frame(); frame()
+for _ in range(LL + 2): frame(); main_frame()
+check(mem[L("OCTAVE")] == 5, "octave kept across loop wraps")
+frame(0x17); main_frame(); frame()
+# stop / play / clear
+tap(TAB)
+n0 = mem[L("NOTECNT")] + mem[L("DRUMCNT")]
+for _ in range(LL + 5): frame(); main_frame()
+check(mem[L("LSTATE")] == 4 and mem[L("NOTECNT")] + mem[L("DRUMCNT")] == n0, "TAB stops: silence")
+tap(TAB)
+check(mem[L("LSTATE")] == 2 and w(L("LPOSLO")) < 3, "TAB again plays from the top")
+tap(BK)
+check(mem[L("LSTATE")] == 0, "BACKSPACE clears")
+tap(SP); frame(); tap(SP)
+check(mem[L("LSTATE")] == 0, "a loop under half a second is cancelled")
 
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):

@@ -197,6 +197,38 @@ LASTSK   = $0648        ;   last SKSTAT & $0C seen
 LOGBUF   = $0A40        ; 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C)
 ZWF      = $8C          ; wait_frame: frame to wait past
 
+; ---- looper: per-frame lanes, one byte per frame, up to 4096 frames ----
+MLANE    = $5000        ; melody: 0 none, 1-96 note-on (n+1), $FE note-off
+DLANE    = $6000        ; drums:  0 none, 1-8 drum (d+1)
+PLANE    = $7000        ; preset: 0 none, 1-10 preset (p+1)
+LANEPGS  = $30          ; 12 KB cleared at record start
+MAXLOOP  = $10          ; hi byte of the 4096-frame cap
+LSTATE   = $0649        ; 0 empty 1 rec 2 play 3 dub (play+record drums) 4 stop
+LCMD     = $064A        ; main -> VBI: 1 SPACE 2 TAB 3 clear 4 stop
+LPOSLO   = $064B        ; loop position (frames)
+LPOSHI   = $064C
+LLENLO   = $064D        ; loop length (frames)
+LLENHI   = $064E
+LCELL    = $064F        ; progress 0-16 for the bar
+LACCLO   = $0650        ; progress accumulator (16 per frame vs LLEN)
+LACCHI   = $0651
+LIVEM    = $0652        ; this frame's live melody event (lane code)
+LIVED    = $0653        ; this frame's live drum (d+1)
+LIVEP    = $0654        ; this frame's preset change (p+1), set by main
+PRESREQ  = $0655        ; VBI -> main: playback wants preset ($FF none)
+LASTLS   = $0656        ; main: loop state as drawn
+LASTCELL = $0657
+LOOPCNT  = $0658        ; +1 per loop wrap (liveness)
+LS_EMPTY = 0
+LS_REC   = 1
+LS_PLAY  = 2
+LS_DUB   = 3
+LS_STOP  = 4
+VP       = $F0          ; VBI-owned ZP pointer (lanes); documented exception
+K_SPACE  = $21
+K_TAB    = $2C
+K_BKSP   = $34
+
 NPARAM   = 12
 PSTRIDE  = 13           ; preset row: 12 params + octave
 
@@ -348,8 +380,11 @@ start:
         sta PREVCON
         lda #$0F
         sta PREVSTK
-        lda #$FE                ; force first piano draw
+        lda #$FE                ; force first piano/loop draw
         sta LASTLIT
+        sta LASTLS
+        lda #$FF
+        sta PRESREQ
 
         lda #$0E                ; GR.0 text luminance
         sta COLOR1
@@ -396,6 +431,12 @@ mainloop:
         jsr wait_frame
         lda PARKREQ
         bne park_self
+        jsr read_stick
+        jsr read_console
+        jsr main_tick
+        jmp mainloop
+
+main_tick:
         inc UICNT
         lda KEYSEQ
         cmp LASTSEQ
@@ -403,10 +444,22 @@ mainloop:
         sta LASTSEQ
         lda KEYEV
         jsr handle_key
-@nk:    jsr read_stick
-        jsr read_console
-        jsr ui_update
-        jmp mainloop
+@nk:    lda PRESREQ             ; loop playback switched the sound
+        cmp #$FF
+        beq @ui
+        tay
+        ldx #$FF
+        stx PRESREQ
+        lda OCTAVE              ; keep the player's octave (on the stack:
+        pha                     ;  select_preset's drawing uses the ZTs)
+        tya
+        jsr select_preset
+        pla
+        sta OCTAVE
+        jsr set_octave
+        lda #0                  ; ...which is playback, not a new change
+        sta LIVEP
+@ui:    jmp ui_update
 
 park_self:
         lda #<RTISTUB
@@ -573,7 +626,40 @@ reset_preset:
         lda PRESET
         jmp select_preset
 
+loop_space:
+        lda LSTATE
+        bne @go                 ; EMPTY -> fresh lanes before recording
+        jsr clear_lanes
+@go:    lda #1
+        sta LCMD
+        rts
+loop_tab:
+        lda #2
+        sta LCMD
+        rts
+loop_clear:
+        lda #3
+        sta LCMD
+        rts
+
+clear_lanes:
+        lda #>MLANE
+        sta ZSCR+1
+        lda #0
+        sta ZSCR
+        tay
+        ldx #LANEPGS
+@c:     sta (ZSCR),y
+        iny
+        bne @c
+        inc ZSCR+1
+        dex
+        bne @c
+        rts
+
 hush:
+        lda #4                  ; stop the loop too
+        sta LCMD
         lda #0
         sta ESTATE
         sta VOLHI
@@ -607,6 +693,9 @@ select_preset:
         lda pcolor,x
         sta COLOR0
         sta LITCOL
+        ldx PRESET
+        inx
+        stx LIVEP               ; recorder: preset change this frame
         jsr set_octave
         jsr draw_name
         jsr draw_presets
@@ -700,7 +789,48 @@ ui_update:
         beq @m
         sta DISPNOTE
         jsr draw_note
-@m:     ; volume meter: row 9, cols 19-33
+@m:     lda LSTATE
+        cmp LASTLS
+        beq @lc
+        sta LASTLS
+        asl a
+        asl a
+        adc LSTATE              ; *5
+        tax
+        ldy #0
+        lda #0
+        sta ZATTR
+        lda LSTATE
+        cmp #LS_REC
+        beq @lr
+        cmp #LS_DUB
+        bne @ls
+@lr:    lda #$80                ; recording states in inverse
+        sta ZATTR
+@ls:    lda lsnames,x
+        jsr asc2int
+        ora ZATTR
+        sta SCREEN+10*40+6,y
+        inx
+        iny
+        cpy #5
+        bne @ls
+        lda #$FE
+        sta LASTCELL
+@lc:    lda LCELL
+        cmp LASTCELL
+        beq @mv
+        sta LASTCELL
+        ldx #0
+@lb:    lda #G_O
+        cpx LCELL
+        bcs @lp
+        lda #G_F
+@lp:    sta SCREEN+10*40+12,x
+        inx
+        cpx #16
+        bne @lb
+@mv:    ; volume meter: row 9, cols 19-33
         ldx #0
 @mc:    lda #G_O
         cpx VOLHI
@@ -1244,6 +1374,7 @@ vbi:
         lda #0
         sta ATRACT
         jsr kb_poll
+        jsr loop_step
         jsr synth
         jsr drum_step
         jmp XITVBV
@@ -1288,6 +1419,8 @@ kb_poll:
         beq @r
         lda #0
         sta GATE
+        lda #$FE                ; recorder: note-off this frame
+        sta LIVEM
         lda #$FF
         sta LITKEY
         lda ESTATE
@@ -1322,9 +1455,24 @@ note_on:                        ; A = key offset 0-16
         bcc @ok
         lda #95
 @ok:    sta NOTE
-        inc NOTECNT
+        clc
+        adc #1
+        sta LIVEM               ; recorder: note-on this frame
         lda #1
         sta GATE
+        jmp note_start
+
+note_play:                      ; A = note 0-95 from the loop
+        sta NOTE
+        sec
+        sbc OCTBASE
+        cmp #17
+        bcc @lit
+        lda #$FF
+@lit:   sta LITKEY
+
+note_start:
+        inc NOTECNT
         lda ESTATE
         bne @act
         lda #1
@@ -1349,8 +1497,22 @@ note_on:                        ; A = key offset 0-16
         sta VTMR
 @leg:   rts
 
+note_stop:                      ; loop note-off (a held live key wins)
+        lda GATE
+        bne @x
+        lda #$FF
+        sta LITKEY
+        lda ESTATE
+        beq @x
+        lda #4
+        sta ESTATE
+@x:     rts
+
 drum_trig:                      ; A = drum 0-7
         tax
+        inx
+        stx LIVED               ; recorder: drum this frame
+        dex
         stx DRUMLIT
         inc DRUMCNT
         lda dr_frq,x
@@ -1407,6 +1569,253 @@ drum_step:
         sta AUDC4
         lda #$FF
         sta DRUMLIT
+        rts
+
+; ---------------------------------------------------------------------------
+; looper (VBI). Commands arrive through LCMD; lanes are cleared by the main
+; thread before it posts the first SPACE (state EMPTY = VBI never touches them)
+loop_step:
+        lda LCMD
+        beq @run
+        ldx #0
+        stx LCMD
+        jsr loop_cmd
+@run:   lda LSTATE
+        cmp #LS_REC
+        beq lp_rec
+        cmp #LS_PLAY
+        beq lp_play
+        cmp #LS_DUB
+        beq lp_play
+lp_clear:
+        lda #0
+        sta LIVEM
+        sta LIVED
+        sta LIVEP
+        rts
+
+lp_rec: jsr lp_ptr
+        ldy #0
+        lda LIVEM
+        sta (VP),y
+        jsr lp_next
+        lda LIVED
+        sta (VP),y
+        jsr lp_next
+        lda LIVEP
+        sta (VP),y
+        jsr lp_clear
+        inc LPOSLO
+        bne @c
+        inc LPOSHI
+@c:     lda LPOSHI
+        sta LCELL               ; recording: bar = fill of the 4096 cap
+        cmp #MAXLOOP
+        bcc @x
+        jmp lp_close            ; cap reached: close and play
+@x:     rts
+
+lp_play:
+        jsr lp_ptr
+        ldy #0
+        lda (VP),y              ; melody
+        beq @d
+        cmp #$FE
+        beq @off
+        sec
+        sbc #1
+        jsr note_play
+        jmp @d
+@off:   jsr note_stop
+@d:     jsr lp_ptr
+        jsr lp_next
+        ldy #0
+        lda LIVED               ; a live hit wins this frame
+        bne @dub
+        lda (VP),y
+        beq @p
+        sec
+        sbc #1
+        jsr drum_trig
+        lda #0
+        sta LIVED               ; playback, not a new live hit
+        beq @p
+@dub:   ldx LSTATE
+        cpx #LS_DUB
+        bne @p
+        sta (VP),y              ; overdub: stamp the live hit into the lane
+@p:     jsr lp_next
+        lda (VP),y              ; preset
+        beq @adv
+        sec
+        sbc #1
+        sta PRESREQ
+@adv:   jsr lp_clear
+        clc                     ; progress: +16/frame vs LLEN (Bresenham)
+        lda LACCLO
+        adc #16
+        sta LACCLO
+        bcc @a1
+        inc LACCHI
+@a1:    lda LACCLO
+        cmp LLENLO
+        lda LACCHI
+        sbc LLENHI
+        bcc @pos
+        sta LACCHI
+        lda LACCLO
+        sbc LLENLO
+        sta LACCLO
+        inc LCELL
+@pos:   inc LPOSLO
+        bne @p2
+        inc LPOSHI
+@p2:    lda LPOSLO
+        cmp LLENLO
+        bne @x
+        lda LPOSHI
+        cmp LLENHI
+        bne @x
+        jmp lp_rewind
+@x:     rts
+
+lp_rewind:
+        lda #0
+        sta LPOSLO
+        sta LPOSHI
+        sta LACCLO
+        sta LACCHI
+        sta LCELL
+        inc LOOPCNT
+        rts
+
+lp_ptr: clc                     ; VP = MLANE + LPOS
+        lda LPOSLO
+        sta VP
+        lda LPOSHI
+        adc #>MLANE
+        sta VP+1
+        rts
+
+lp_next:                        ; next lane, same frame
+        lda VP+1
+        clc
+        adc #$10
+        sta VP+1
+        rts
+
+lp_close:                       ; end the first recording: LLEN = LPOS
+        lda LPOSHI
+        bne @ok
+        lda LPOSLO
+        cmp #30
+        bcs @ok
+        jmp lp_empty            ; under half a second: cancel
+@ok:    lda LPOSLO
+        sta LLENLO
+        lda LPOSHI
+        sta LLENHI
+        lda GATE                ; key still held: end the note at the seam
+        beq @go
+        lda LPOSLO
+        sec
+        sbc #1
+        sta VP
+        lda LPOSHI
+        sbc #0
+        clc
+        adc #>MLANE
+        sta VP+1
+        ldy #0
+        lda (VP),y
+        bne @go
+        lda #$FE
+        sta (VP),y
+@go:    jsr lp_rewind
+        lda #LS_PLAY
+        sta LSTATE
+        rts
+
+lp_empty:
+        lda #LS_EMPTY
+        sta LSTATE
+lp_hush:
+        lda #0
+        sta LCELL
+        lda GATE
+        bne @x
+        lda ESTATE
+        beq @x
+        lda #4
+        sta ESTATE
+@x:     rts
+
+loop_cmd:                       ; A = command
+        cmp #1
+        bne @tab
+        ldx LSTATE              ; SPACE: rec / close / overdub toggle
+        cpx #LS_EMPTY
+        bne @s1
+        jsr lp_rewind
+        lda #0
+        sta LOOPCNT
+        ldx PRESET              ; the loop starts in the current sound
+        inx
+        stx LIVEP
+        lda #LS_REC
+        sta LSTATE
+        rts
+@s1:    cpx #LS_REC
+        bne @s2
+        jmp lp_close
+@s2:    cpx #LS_PLAY
+        bne @s3
+        lda #LS_DUB
+        sta LSTATE
+        rts
+@s3:    cpx #LS_DUB
+        bne @s4
+        lda #LS_PLAY
+        sta LSTATE
+        rts
+@s4:    jsr lp_rewind           ; STOP: overdub from the top
+        lda #LS_DUB
+        sta LSTATE
+        rts
+@tab:   cmp #2
+        bne @clr
+        ldx LSTATE              ; TAB: play / stop
+        cpx #LS_REC
+        bne @t1
+        jsr lp_close
+        lda LSTATE
+        cmp #LS_PLAY
+        bne @tx
+        lda #LS_STOP
+        sta LSTATE
+        jmp lp_hush
+@t1:    cpx #LS_STOP
+        bne @t2
+        jsr lp_rewind
+        lda #LS_PLAY
+        sta LSTATE
+        rts
+@t2:    cpx #LS_EMPTY
+        beq @tx
+        lda #LS_STOP
+        sta LSTATE
+        jmp lp_hush
+@tx:    rts
+@clr:   cmp #3
+        bne @stp
+        jmp lp_empty
+@stp:   ldx LSTATE              ; 4: stop if playing
+        cpx #LS_PLAY
+        beq @st
+        cpx #LS_DUB
+        bne @tx
+@st:    lda #LS_STOP
+        sta LSTATE
         rts
 
 ; ---------------------------------------------------------------------------
@@ -1841,11 +2250,15 @@ dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
-NCMD = 8
+            .byte K_SPACE,K_TAB,K_BKSP
+NCMD = 11
 cmdlo:      .byte <(oct_down-1),<(oct_up-1),<(ed_up-1),<(ed_down-1)
             .byte <(ed_left-1),<(ed_right-1),<(reset_preset-1),<(hush-1)
+            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1)
 cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
+            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1)
+lsnames:    .byte "EMPTYREC  PLAY DUB  STOP "
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30,$32   ; 1..9, 0
 presetkey:  .byte "1234567890"
 
@@ -1899,8 +2312,10 @@ static_text:
         .byte 11,1,0, "DRUMS",0
         .byte 15,21,0, "< PICK: KEYS 1-9,0",0
         .byte 16,1,$80, "SOUND EDITOR",0
-        .byte 16,14,0, "ARROWS/STICK: PICK, SET",0
-        .byte 23,0,0, "Z/X OCTAVE  RETURN RESET  ESC SILENCE",0
+        .byte 16,14,0, "ARROWS/STICK  RET=RESET",0
+        .byte 10,1,0, "LOOP",0
+        .byte 10,29,0, "BKSP CLEAR",0
+        .byte 23,0,0, "Z/X OCTAVE ESC HUSH  SPACE REC  TAB PLAY",0
         .byte $FF
 
 ; screen row address tables
