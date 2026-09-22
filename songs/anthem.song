@@ -1,0 +1,9 @@
+# ANTHEM - full arrangement (compose_anthem.py). ~80 s.
+anthem_intro 1
+anthem_verse 1
+anthem_chorus 2
+anthem_verse 1
+anthem_chorus 2
+anthem_break 1
+anthem_chorus 2
+anthem_outro 1

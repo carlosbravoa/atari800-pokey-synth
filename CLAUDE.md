@@ -139,6 +139,17 @@ python3 songfile.py info mysong
   gaps on the Atari clock. Read RTCLOK hi/lo in one peek: two single-byte
   peeks tear across the low-byte wrap (a phantom 256-frame gap).
 
+### Composed songs
+
+`compose_anthem.py` writes a song entirely on the PC: loops/anthem_*.psl
+(intro, verse, chorus, break, outro), songs/anthem.song and the packed
+anthem.pss. It's ~82 s, arranged intro-verse-chorus x2-verse-chorus
+x2-break-chorus x2-outro. Sections are built on the demo grid (16
+steps/bar, S frames/step) exactly as the 6502 loader would lay them out,
+with the factory preset table read from the build. Copy it as a template
+for new songs. `songfile.py play anthem` verified on hardware: passes
+[1,1,2,1,2,1,2,1], seam gaps within polling jitter.
+
 ## Chords (polyphony without two keys)
 
 - CHORD values: OFF MAJOR MINOR 7TH OCTAVE POWER DIM **AUTO**. AUTO is
