@@ -155,10 +155,11 @@ it switches to expanded mode by itself:
   names are aliases.
 - Verified on hardware with the board's stereo ON: detection, the key-held
   check staying stereo, and all six demos routed (track 2 on its own voice,
-  lead and preset untouched). Hardware tests are mode-aware. **Not yet seen
-  on hardware:** the stereo-off fallback, and mono after this refactor
-  (py65-covered). Switch OSD stereo off and rerun `hwtest.py`/`hwloop.py`/
-  `hwdemo.py` to check.
+  lead and preset untouched). Hardware tests are mode-aware. Mono verified on
+  hardware too (2026-09-22, OSD stereo off + cold boot): detected mono, so no
+  false positive on this core's POKEY, and all three suites pass. **Not yet
+  seen on hardware:** the runtime fallback (stereo switched off in the OSD
+  WHILE the synth runs, then a key press). py65 covers it.
 
 ## Screen
 
