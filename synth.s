@@ -241,6 +241,18 @@ D_DLT    = DB+2
 D_CTL    = DB+3
 D_VSH    = DB+4
 D_CLK    = DB+5
+; POKEY register image, both chips: the VBI engines write here and
+; pokey_out copies it at the end of the VBI (POKEY registers are write-only,
+; so the image is what makes mirroring POKEY1 onto POKEY2 possible)
+SH       = $0B78        ; 32 bytes = $D200-$D21F
+SAUDF1   = SH+0
+SAUDC1   = SH+1
+SAUDF2   = SH+2
+SAUDC2   = SH+3
+SAUDF3   = SH+4
+SAUDC3   = SH+5
+SAUDF4   = SH+6
+SAUDC4   = SH+7
 NOTE2CNT = $066D        ; +1 per slot-0 (track 1) note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
@@ -476,7 +488,7 @@ start:
         sta VDSLST
         lda #>dli
         sta VDSLST+1
-        ldx #VBS*2+15           ; loop voice + drum blocks
+        ldx #VBS*2+16+32-1      ; loop voice + drum blocks + register image
         lda #0
 @vz:    sta VB,x
         dex
@@ -1749,6 +1761,7 @@ vbi:
         ldx #VBS
         jsr lv_step
         jsr drum_step
+        jsr pokey_out
         jmp XITVBV
 
 kb_poll:
@@ -1933,9 +1946,9 @@ drum_one:                       ; X = block, Y = AUDF register offset
         dec D_TMR,x
         lda D_CLK,x             ; attack transient: one frame of loud noise
         beq @body
-        sta AUDF1,y
+        sta SAUDF1,y
         lda #$8F
-        sta AUDC1,y
+        sta SAUDC1,y
         lda #0
         sta D_CLK,x
         rts
@@ -1947,7 +1960,7 @@ drum_one:                       ; X = block, Y = AUDF register offset
         sta D_DLT,x
         lda #$FF
 @nf:    sta D_FRQ,x
-        sta AUDF1,y
+        sta SAUDF1,y
         lda D_TMR,x             ; vol = min(TMR*4 >> VSH, 15)
         asl a
         asl a
@@ -1962,14 +1975,14 @@ drum_one:                       ; X = block, Y = AUDF register offset
         bcc @v
         lda #15
 @v:     ora D_CTL,x
-        sta AUDC1,y
+        sta SAUDC1,y
         rts
 @off:   cpx #0                  ; idle live block: a chord tone may own ch4
         bne @o2
         lda POLY4
         bne @o3
 @o2:    lda #0
-        sta AUDC1,y
+        sta SAUDC1,y
 @o3:    rts
 
 ; ---------------------------------------------------------------------------
@@ -2353,6 +2366,7 @@ loop_cmd:                       ; A = command
         sta LSTATE
         rts
 
+.segment "HIDATA"                ; (code runs from any segment)
 ; ---- loop voices: wave, ADSR, chord; X = block (0 or VBS) --------------
 lv_load:                        ; A = preset: copy its live params
         sta V_PRE,x
@@ -2438,10 +2452,10 @@ lv_step:                        ; VBI, X = block
         lda #0
         cpx #0
         bne @i1
-        sta AUDC1+P2
-        sta AUDC2+P2
+        sta SAUDC1+P2
+        sta SAUDC2+P2
         rts
-@i1:    sta AUDC3+P2
+@i1:    sta SAUDC3+P2
 @x:     rts
 @go:    sty VT2                 ; AUDF register offset
         sta VT3                 ; 1 = 16-bit pair
@@ -2491,7 +2505,7 @@ lv_step:                        ; VBI, X = block
         jmp @pf
 @rs:    lda rasp64,y
 @pf:    ldy VT2
-        sta AUDF1,y
+        sta SAUDF1,y
         jmp @env
 @p16:   lda V_PAR,x             ; 16-bit @1.79 MHz tables (as the lead)
         cmp #1
@@ -2510,11 +2524,11 @@ lv_step:                        ; VBI, X = block
         sta VT0
         lda rasp_hi,y
 @w16:   ldy VT2
-        sta AUDF2,y
+        sta SAUDF2,y
         lda VT0
-        sta AUDF1,y
+        sta SAUDF1,y
         lda #0
-        sta AUDC1,y
+        sta SAUDC1,y
 @env:   lda V_EST,x             ; ADSR (same shape as the lead's)
         bne @ev
         jmp @vo
@@ -2580,11 +2594,13 @@ lv_step:                        ; VBI, X = block
         lda VT3
         bne @c16
         pla
-        sta AUDC1,y
+        sta SAUDC1,y
         rts
 @c16:   pla
-        sta AUDC2,y             ; the pair sounds on its high channel
+        sta SAUDC2,y             ; the pair sounds on its high channel
         rts
+
+.segment "CODE"
 
 ; ---------------------------------------------------------------------------
 synth:
@@ -2844,10 +2860,10 @@ synth:
 
 @out:   lda VT2
         sta OUTLO
-        sta AUDF1
+        sta SAUDF1
         lda VT3
         sta OUTHI
-        sta AUDF2
+        sta SAUDF2
 
         ; ---- ADSR envelope
         lda ESTATE
@@ -2910,9 +2926,9 @@ synth:
 @edone: ldx P_WAVE
         lda VOLHI
         ora wavebits,x
-        sta AUDC2
+        sta SAUDC2
         lda #0
-        sta AUDC1
+        sta SAUDC1
 
         ; ---- layer voice (ch3) + echo ring
         ldx ECHOPOS
@@ -2953,7 +2969,7 @@ synth:
         cmp #64
         bcc @l3
         sbc #1                  ; carry set here: -1
-@l3:    sta AUDF3
+@l3:    sta SAUDF3
         lda VOLHI               ; 3/4 volume
         lsr a
         lsr a
@@ -2962,7 +2978,7 @@ synth:
         sec
         sbc VT0
         ora #$A0
-        sta AUDC3
+        sta SAUDC3
         rts
 @echo:  lda ECHOPOS             ; the frame written 20 frames ago
         clc
@@ -2971,16 +2987,17 @@ synth:
         tax
         ldy ECHON,x
         lda lay64,y
-        sta AUDF3
+        sta SAUDF3
         lda ECHOV,x
         lsr a
         ora #$A0
-        sta AUDC3
+        sta SAUDC3
         rts
 @loff:  lda #0
-        sta AUDC3
+        sta SAUDC3
         rts
 
+.segment "HIDATA"
 ; held chord: two tones above the lead's root on POKEY1 ch3 + ch4, in the
 ; lead's wave (8-bit tables) at 3/4 of its envelope. ch3 yields to the
 ; loop's voice 2, ch4 to any drum on block 0.
@@ -3012,9 +3029,9 @@ poly_out:
         bne @t2
         lda VT0
         jsr poly_pitch
-        sta AUDF3
+        sta SAUDF3
         lda VT4
-        sta AUDC3
+        sta SAUDC3
 @t2:    lda VT1
         cmp #$FF
         beq @x
@@ -3022,9 +3039,9 @@ poly_out:
         bne @x
         lda VT1
         jsr poly_pitch
-        sta AUDF4
+        sta SAUDF4
         lda VT4
-        sta AUDC4
+        sta SAUDC4
         lda #1
         sta POLY4
 @x:     rts
@@ -3047,6 +3064,45 @@ poly_pitch:                     ; A = semitones above NOTE -> 8-bit AUDF
         rts
 @rs:    lda rasp64,y
         rts
+
+; End of VBI: the image -> POKEY1; in stereo, POKEY2 either gets the loop's
+; own voices (PLAY/DUB) or, when it's otherwise idle, a mirror of POKEY1 with
+; the lead a few cents flat on the right: a centered, slightly wide sound for
+; solo playing. Recording is unaffected (it records notes, not registers).
+pokey_out:
+        ldx #7
+@p1:    lda SH,x
+        sta AUDF1,x
+        dex
+        bpl @p1
+        lda STEREO
+        beq @x
+        lda LSTATE
+        cmp #LS_PLAY
+        beq @loop
+        cmp #LS_DUB
+        beq @loop
+        ldx #7
+@m:     lda SH,x
+        sta AUDF1+P2,x
+        dex
+        bpl @m
+        clc                     ; lead period + period/256 (~7 cents flat)
+        lda SAUDF1
+        adc SAUDF2
+        sta AUDF1+P2
+        lda SAUDF2
+        adc #0
+        sta AUDF2+P2
+@x:     rts
+@loop:  ldx #7
+@q:     lda SH+P2,x
+        sta AUDF1+P2,x
+        dex
+        bpl @q
+        rts
+
+.segment "CODE"
 
 ; ---------------------------------------------------------------------------
 ; DLI: piano colors for rows 3-7, GR.0 colors again from row 8

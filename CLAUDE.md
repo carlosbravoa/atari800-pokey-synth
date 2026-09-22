@@ -214,10 +214,11 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
 - `hwloop.py` runs the full record/replay/overdub/stop/clear cycle with real
   HID keys and checks lanes and counters. Per-pass counts are measured
   between loop wraps (`aligned()`), not over wall-clock windows.
-- VBI order: kb_poll -> loop_step -> synth (lead + layer) -> v2_step -> drum_step.
+- VBI order: kb_poll -> loop_step -> synth (lead + layer/chords) -> lv_step x2 -> drum_step -> pokey_out.
 - **Code budget**: two load segments. MAIN `$2000-$3BFF` holds code +
-  RODATA, ending ~$3BCB (**~50 bytes free**; the next Atari-side feature
-  must first move code into HIDATA, since code runs from any segment). HIDATA `$4400-$4FFF` holds the pitch
+  RODATA, ending ~$3924 (~730 bytes free). The loop-voice engine, chord
+  output and `pokey_out` now live in HIDATA (code runs from any segment),
+  which ends ~$4EBC (~320 bytes free). HIDATA `$4400-$4FFF` holds the pitch
   tables and demos, ending ~$4A43 (~1.5 KB free). Don't use `$A000+`: BASIC
   is still mapped when USR-launched from READY.
 
@@ -249,6 +250,18 @@ it switches to expanded mode by itself:
   switched off), so STEREO drops to 0. Switching stereo ON mid-session is
   picked up by the next ESC.
 - The title shows `STEREO 2-POKEY` in place of `8-BIT KEYBOARD`.
+- **Solo mirror**: whenever POKEY2 isn't carrying a loop (EMPTY, REC,
+  STOP), `pokey_out` mirrors POKEY1 onto it: layer, chord tones and drums
+  identical, and the lead's period + period/256 (~7 cents flat on the
+  right). The result is a centered, slightly wide chorus for solo playing.
+  In PLAY/DUB, POKEY2 carries the loop as before. Only the sound changes;
+  recording stores notes, not registers.
+- **Register image**: the VBI engines (synth, poly_out, lv_step, drum_one)
+  never write POKEY directly. They write the 32-byte image `SH` at `$0B78`
+  (= `$D200-$D21F`, same offsets), and `pokey_out` runs last in the VBI and
+  copies it out. That's the only way to mirror, since POKEY registers are
+  write-only. Main-thread code (init, park, detect) still writes directly.
+  New VBI sound code must use the `SAUD*` names.
 - Engines: `lv_step` (X = voice block 0/VBS) drives both loop voices,
   choosing the output registers (Y offset) and 8/16-bit per mode.
   `drum_one` (X = block 0/8, Y = register offset) drives both drum
@@ -310,6 +323,7 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$0A00-$0A3F` | echo ring |
 | `$0A40-$0B3F` | key logger |
 | `$0B40-$0B77` | loop voice blocks (2 x 20) + drum blocks (2 x 8) |
+| `$0B78-$0B97` | POKEY register image (both chips), copied out by `pokey_out` |
 | `$5000-$9FFF` | looper lanes (M1, drums, P1, M2, P2) |
 | `$F0-$F1` | VBI lane pointer (ZP exception) |
 | `$2000-$3BFF` | code + data (MAIN cap) |

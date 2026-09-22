@@ -117,6 +117,7 @@ def frame(key=None):
     call("lv_step", x=0)
     call("lv_step", x=20)
     call("drum_step")
+    call("pokey_out")
     return w(L("OUTLO")), mem[L("VOLHI")], mem[L("ESTATE")]
 
 
@@ -445,7 +446,37 @@ for _ in range(3): frame()
 check(mem[0xD207] & 0x0F > 0, "a live kick sounds on POKEY1 ch4 over the loop")
 tap(TAB)
 for _ in range(3): frame()
-check(mem[0xD213] == 0 and mem[0xD215] == 0, "stop silences the POKEY2 voices")
+check(mem[L("V_EST")] == 0 and mem[L("V_EST") + 20] == 0
+      and mem[0xD213] == mem[0xD203] and mem[0xD215] == mem[0xD205],
+      "stop releases the loop voices; POKEY2 goes back to mirroring the player")
+# solo in stereo: POKEY2 mirrors POKEY1, the lead a few cents flat
+tap(BK)
+call("select_preset", a=1)             # ORGAN: lead + octave layer
+for _ in range(4): frame(A)
+per1 = mem[0xD200] | mem[0xD202] << 8
+per2 = mem[0xD210] | mem[0xD212] << 8
+check(per2 == per1 + (per1 >> 8) and mem[0xD213] == mem[0xD203] and mem[0xD213] & 0x0F,
+      f"solo: right lead {per2} = left {per1} + {per1 >> 8} (~7 cents), same AUDC")
+check(mem[0xD214] == mem[0xD204] and mem[0xD215] == mem[0xD205] and mem[0xD215] & 0x0F,
+      "solo: the layer is mirrored on POKEY2 ch3")
+frame(C); frame()
+check(mem[0xD217] == mem[0xD207] and mem[0xD217] & 0x0F, "solo: drums mirrored on POKEY2 ch4")
+for _ in range(40): frame()
+tap(SP)                                # recording: still mirrored
+for _ in range(3): frame(A)
+check(mem[L("LSTATE")] == 1 and mem[0xD213] == mem[0xD203] and mem[0xD213] & 0x0F,
+      "while recording POKEY2 still mirrors the player")
+for _ in range(40): frame()
+tap(SP)                                # close -> PLAY: POKEY2 back to the loop
+while w(L("LPOSLO")) != 0: frame()
+for _ in range(20): frame()             # the recorded C4 is sounding on track 1
+per2 = mem[0xD210] | mem[0xD212] << 8
+pure36 = mem[L("pure_lo") + 36] | mem[L("pure_hi") + 36] << 8
+check(mem[L("LSTATE")] == 2 and per2 == pure36,
+      f"loop playing: POKEY2 pair = track 1's exact C4 ({per2}), not the detuned mirror")
+for _ in range(40): frame()
+tap(BK)
+call("select_preset", a=0)
 # passive fallback: key down but POKEY2's SKSTAT agrees -> mirror -> mono
 mem[0xD21F] = 0x00                     # (in py65 $D20F/$D21F are separate bytes)
 frame(A)
