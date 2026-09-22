@@ -149,11 +149,6 @@ NOTEIDX  = $0619        ; note incl. chord offset (what's sounding)
 GLFRESH  = $061A        ; 1 = next frame snaps pitch (note from silence)
 REMKEY   = $061B        ; remote test mailbox: key code to "hold" ...
 REMHOLD  = $061C        ; ... for this many frames (PC pokes REMKEY first)
-DTMR     = $061D        ; drum engine
-DFRQ     = $061E
-DDLT     = $061F
-DCTL     = $0620
-DVSH     = $0621
 DRUMLIT  = $0622        ; drum sounding ($FF none)
 NOTECNT  = $0623        ; +1 per note-on
 DRUMCNT  = $0624        ; +1 per drum hit
@@ -189,7 +184,6 @@ LASTDRUM = $0640
 DISPNOTE = $0641
 PREVCON  = $0642
 UICNT    = $0643        ; main: +1 per UI frame (liveness)
-DCLK     = $0644        ; drum: AUDF of a 1-frame noise click (0 = none)
 LOGPOS   = $0645        ; key logger: next slot (0-63)
 LOGN     = $0646        ;   total changes logged (wraps)
 LASTKB   = $0647        ;   last KBCODE seen
@@ -221,21 +215,42 @@ PRESREQ  = $0655        ; VBI -> main: playback wants preset ($FF none)
 LASTLS   = $0656        ; main: loop state as drawn
 LASTCELL = $0657
 LOOPCNT  = $0658        ; +1 per loop wrap (liveness)
-; voice 2 (ch3): plays track 1 while the loop runs
-V2PRE    = $0659        ; preset of track 1's sound
-V2NOTE   = $065A
-V2EST    = $065B        ; envelope state (as ESTATE)
-V2VLO    = $065C
-V2VHI    = $065D
-V2APOS   = $065E
-V2ATMR   = $065F
-V2IDX    = $0660        ; note incl. chord
-V2PAR    = $0661        ; 12 bytes: track 1 preset params (copied from live)
-NOTE2CNT = $066D        ; +1 per voice-2 note-on
+; loop voices: two 20-byte blocks, slot 0 = track 1, slot 1 = track 2
+;   mono:   slot 0 -> POKEY1 ch3 (8-bit), slot 1 unused (track 2 -> lead)
+;   stereo: slot 0 -> POKEY2 ch1+2 (16-bit), slot 1 -> POKEY2 ch3 (8-bit)
+VB       = $0B40
+VBS      = 20           ; block size / offset of slot 1
+V_PRE    = VB+0         ; preset of the track's sound
+V_NOTE   = VB+1
+V_EST    = VB+2         ; envelope state (as ESTATE)
+V_VLO    = VB+3
+V_VHI    = VB+4
+V_APOS   = VB+5
+V_ATMR   = VB+6
+V_IDX    = VB+7         ; note incl. chord
+V_PAR    = VB+8         ; 12 bytes: preset params (copied from live)
+V2EST    = V_EST        ; slot-0 aliases (tests, docs)
+V2VHI    = V_VHI
+V2PRE    = V_PRE
+; drums: two 8-byte blocks, 0 = live (POKEY1 ch4), 8 = loop in stereo
+; (POKEY2 ch4); in mono the loop's drums use block 0 too (a live hit wins)
+DB       = $0B68
+D_TMR    = DB+0
+D_FRQ    = DB+1
+D_DLT    = DB+2
+D_CTL    = DB+3
+D_VSH    = DB+4
+D_CLK    = DB+5
+NOTE2CNT = $066D        ; +1 per slot-0 (track 1) note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
 LASTDEMO = $0670        ; main: demo name as drawn
 MUTEMEL  = $0671        ; 1 = loop plays drums only (melody tracks muted)
+NOTE3CNT = $0672        ; +1 per slot-1 (track 2, stereo) note-on
+STEREO   = $0673        ; 1 = a second POKEY answers at $D210 (auto-detected)
+LASTSTE  = $0674        ; main: title as drawn
+P2       = $10          ; POKEY2 register offset from POKEY1
+RANDOM   = $D20A
 K_Q      = $2F          ; toggles MUTEMEL
 K_LT     = $36          ; '<' (PC '-' in Atari layout): previous demo
 K_GT     = $37          ; '>' (PC '='): next demo
@@ -419,6 +434,7 @@ start:
         lda #$FF
         sta PRESREQ
         sta LASTDEMO
+        sta LASTSTE
 
         lda #$0E                ; GR.0 text luminance
         sta COLOR1
@@ -451,6 +467,12 @@ start:
         sta VDSLST
         lda #>dli
         sta VDSLST+1
+        ldx #VBS*2+15           ; loop voice + drum blocks
+        lda #0
+@vz:    sta VB,x
+        dex
+        bpl @vz
+        jsr detect_stereo
         lda #7
         ldx #>vbi
         ldy #<vbi
@@ -510,7 +532,14 @@ park_self:
         sta AUDC3
         sta AUDC4
         sta AUDCTL
-        sta PARKREQ
+        ldx STEREO
+        beq @pm
+        sta AUDC1+P2
+        sta AUDC2+P2
+        sta AUDC3+P2
+        sta AUDC4+P2
+        sta AUDCTL+P2
+@pm:    sta PARKREQ
         sei
         lda POKMSK
         ora #$C0
@@ -851,14 +880,55 @@ clear_lanes:
         bne @c
         rts
 
+; Second POKEY at $D210? With no stereo hardware $D21x mirrors POKEY1, so:
+; run POKEY1, then put "$D21F" into init. Mirror -> POKEY1 itself is now in
+; init and RANDOM freezes; real POKEY2 -> POKEY1's RANDOM keeps running.
+; Safe on any Atari (a few microseconds of POKEY1 init at worst).
+detect_stereo:
+        lda #0
+        sta STEREO              ; VBI stays off POKEY2 meanwhile
+        php
+        sei
+        lda #3
+        sta SKCTL
+        lda #0
+        sta SKCTL+P2
+        ldx #8
+@s:     lda RANDOM
+        cmp RANDOM
+        bne @st
+        dex
+        bne @s
+        lda #3                  ; mono: POKEY1 back out of init
+        sta SKCTL+P2
+        sta SKCTL
+        plp
+        rts
+@st:    lda #3
+        sta SKCTL+P2
+        sta SKCTL
+        lda #$50                ; POKEY2 like POKEY1: ch1 1.79 MHz + 1/2 joined
+        sta AUDCTL+P2
+        lda #0
+        ldx #7
+@z:     sta AUDF1+P2,x
+        dex
+        bpl @z
+        sta D_TMR+8
+        lda #1
+        sta STEREO
+        plp
+        rts
+
 hush:
+        jsr detect_stereo       ; ESC re-checks (e.g. stereo just enabled)
         lda #4                  ; stop the loop too
         sta LCMD
         lda #0
         sta ESTATE
         sta VOLHI
         sta VOLLO
-        sta DTMR
+        sta D_TMR
         sta GATE
         ldx #$1F
 @e:     sta ECHOV,x
@@ -1030,7 +1100,24 @@ ui_update:
         inx
         cpx #16
         bne @lb
-@mv:    lda DEMOIDX
+@mv:    lda STEREO
+        cmp LASTSTE
+        beq @md
+        sta LASTSTE
+        ldx #0
+        ldy #0
+        lda STEREO
+        beq @tw
+        ldy #14
+@tw:    lda titlewords,y
+        jsr asc2int
+        ora #$80
+        sta SCREEN+17,x
+        iny
+        inx
+        cpx #14
+        bne @tw
+@md:    lda DEMOIDX
         cmp LASTDEMO
         beq @vm
         sta LASTDEMO
@@ -1612,7 +1699,10 @@ vbi:
         jsr kb_poll
         jsr loop_step
         jsr synth
-        jsr v2_step
+        ldx #0
+        jsr lv_step
+        ldx #VBS
+        jsr lv_step
         jsr drum_step
         jmp XITVBV
 
@@ -1626,7 +1716,15 @@ kb_poll:
 @hw:    lda SKSTAT
         and #$04
         bne @up
-        lda KBCODE
+        lda STEREO              ; key down: POKEY2 (no keyboard) must say up
+        beq @kc
+        lda SKSTAT+P2
+        and #$04
+        bne @kc
+        lda #0                  ; it mirrors POKEY1: stereo was switched off
+        sta STEREO
+        sta D_TMR+8
+@kc:    lda KBCODE
         and #$3F
 @down:  cmp HELD
         beq @same
@@ -1745,67 +1843,84 @@ note_stop:                      ; loop note-off (a held live key wins)
         sta ESTATE
 @x:     rts
 
-drum_trig:                      ; A = drum 0-7
+drum_trig:                      ; A = drum 0-7, live pad (or mono loop)
         tax
         inx
         stx LIVED               ; recorder: drum this frame
-        dex
-        stx DRUMLIT
+        ldx #0
+drum_start:                     ; A = drum, X = block (0 live / 8 loop)
+        tay
+        sty DRUMLIT
         inc DRUMCNT
-        lda dr_frq,x
-        sta DFRQ
-        lda dr_dlt,x
-        sta DDLT
-        lda dr_ctl,x
-        sta DCTL
-        lda dr_vsh,x
-        sta DVSH
-        lda dr_clk,x
-        sta DCLK
-        lda dr_len,x
-        sta DTMR
+        lda dr_frq,y
+        sta D_FRQ,x
+        lda dr_dlt,y
+        sta D_DLT,x
+        lda dr_ctl,y
+        sta D_CTL,x
+        lda dr_vsh,y
+        sta D_VSH,x
+        lda dr_clk,y
+        sta D_CLK,x
+        lda dr_len,y
+        sta D_TMR,x
         rts
 
-drum_step:
-        lda DTMR
-        beq @off
-        dec DTMR
-        lda DCLK                ; attack transient: one frame of loud noise
-        beq @body
-        sta AUDF4
-        lda #$8F
-        sta AUDC4
-        lda #0
-        sta DCLK
-        rts
-@body:
-        lda DFRQ
-        clc
-        adc DDLT
-        bcc @nf
-        lda #0
-        sta DDLT
-        lda #$FF
-@nf:    sta DFRQ
-        sta AUDF4
-        lda DTMR                ; vol = min(TMR*4 >> VSH, 15)
-        asl a
-        asl a
-        ldx DVSH
-        beq @nv
-@sh:    lsr a
-        dex
-        bne @sh
-@nv:    cmp #16
-        bcc @v
-        lda #15
-@v:     ora DCTL
-        sta AUDC4
-        rts
-@off:   lda #0
-        sta AUDC4
+drum_step:                      ; VBI: block 0 on POKEY1 ch4, block 8 on POKEY2
+        ldx #0
+        ldy #$06
+        jsr drum_one
+        lda STEREO
+        beq @m
+        ldx #8
+        ldy #$06+P2
+        jsr drum_one
+@m:     lda D_TMR
+        ora D_TMR+8
+        bne @x
         lda #$FF
         sta DRUMLIT
+@x:     rts
+
+drum_one:                       ; X = block, Y = AUDF register offset
+        lda D_TMR,x
+        beq @off
+        dec D_TMR,x
+        lda D_CLK,x             ; attack transient: one frame of loud noise
+        beq @body
+        sta AUDF1,y
+        lda #$8F
+        sta AUDC1,y
+        lda #0
+        sta D_CLK,x
+        rts
+@body:  lda D_FRQ,x
+        clc
+        adc D_DLT,x
+        bcc @nf
+        lda #0
+        sta D_DLT,x
+        lda #$FF
+@nf:    sta D_FRQ,x
+        sta AUDF1,y
+        lda D_TMR,x             ; vol = min(TMR*4 >> VSH, 15)
+        asl a
+        asl a
+        sty VT0
+        ldy D_VSH,x
+        beq @nv
+@sh:    lsr a
+        dey
+        bne @sh
+@nv:    ldy VT0
+        cmp #16
+        bcc @v
+        lda #15
+@v:     ora D_CTL,x
+        sta AUDC1,y
+        rts
+@off:   lda #0
+        sta AUDC1,y
         rts
 
 ; ---------------------------------------------------------------------------
@@ -1865,13 +1980,27 @@ lp_play:
         beq @off
         sec
         sbc #1
-        jsr v2_on
+        ldx #0
+        jsr lv_on
         jmp @d
-@off:   jsr v2_off
+@off:   ldx #0
+        jsr lv_off
 @d:     jsr lp_ptr
         jsr lp_next
         ldy #0
-        lda LIVED               ; a live hit wins this frame
+        lda STEREO              ; stereo: loop drums have their own channel
+        beq @dm
+        lda (VP),y
+        beq @dsl
+        sec
+        sbc #1
+        ldx #8
+        jsr drum_start
+        ldy #0
+@dsl:   lda LIVED
+        bne @dub
+        beq @p
+@dm:    lda LIVED               ; mono: a live hit wins this frame
         bne @dub
         lda (VP),y
         beq @p
@@ -1890,7 +2019,8 @@ lp_play:
         beq @t2
         sec
         sbc #1
-        jsr v2_load
+        ldx #0
+        jsr lv_load
 @t2:    jsr lp_next             ; track 2 melody -> lead (a live note wins)
         ldy #0
         lda LIVEM
@@ -1899,6 +2029,8 @@ lp_play:
         bne @q2
         lda (VP),y
         beq @q2
+        ldx STEREO              ; stereo: track 2 has its own voice
+        bne @m2st
         cmp #$FE
         beq @m2off
         sec
@@ -1906,6 +2038,15 @@ lp_play:
         jsr note_play
         jmp @q2
 @m2off: jsr note_stop
+        jmp @q2
+@m2st:  ldx #VBS
+        cmp #$FE
+        beq @m2so
+        sec
+        sbc #1
+        jsr lv_on
+        jmp @q2
+@m2so:  jsr lv_off
         jmp @q2
 @m2dub: ldx LSTATE              ; overdub: stamp the live note event
         cpx #LS_DUB
@@ -1921,7 +2062,12 @@ lp_play:
         beq @adv
         sec
         sbc #1
+        ldx STEREO              ; stereo: track 2's own voice, not the lead
+        bne @p2st
         sta PRESREQ
+        jmp @adv
+@p2st:  ldx #VBS
+        jsr lv_load
         jmp @adv
 @q2dub: ldx LSTATE
         cpx #LS_DUB
@@ -2021,6 +2167,8 @@ lp_hush:
         sta LCELL
         sta V2EST
         sta V2VHI
+        sta V_EST+VBS
+        sta V_VHI+VBS
         lda GATE
         bne @x
         lda ESTATE
@@ -2037,6 +2185,8 @@ lp_mute:                        ; toggle drums-only; silence the loop's voices
         lda #0
         sta V2EST
         sta V2VHI
+        sta V_EST+VBS
+        sta V_VHI+VBS
         lda GATE                ; a held live note keeps sounding
         bne @x
         lda ESTATE
@@ -2064,6 +2214,8 @@ loop_cmd:                       ; A = command
         sta T1USED
         sta V2EST
         sta V2VHI
+        sta V_EST+VBS
+        sta V_VHI+VBS
         ldx PRESET              ; the loop starts in the current sound
         inx
         stx LIVEP
@@ -2122,39 +2274,48 @@ loop_cmd:                       ; A = command
         sta LSTATE
         rts
 
-; ---- voice 2: track 1 on ch3 (8-bit @64 kHz): wave, ADSR, chord ----
-v2_load:                        ; A = preset: copy its live params
-        sta V2PRE
-        tax
-        lda pbase,x
-        tax
-        ldy #0
-@c:     lda live,x
-        sta V2PAR,y
-        inx
+; ---- loop voices: wave, ADSR, chord; X = block (0 or VBS) --------------
+lv_load:                        ; A = preset: copy its live params
+        sta V_PRE,x
+        stx VT5
+        tay
+        lda pbase,y
+        tay
+        lda #NPARAM
+        sta VT4
+@c:     lda live,y
+        sta V_PAR,x
         iny
-        cpy #NPARAM
+        inx
+        dec VT4
         bne @c
+        ldx VT5
         rts
 
-v2_on:                          ; A = note 0-95
-        sta V2NOTE
-        inc NOTE2CNT
+lv_on:                          ; A = note 0-95
+        sta V_NOTE,x
         lda #1
-        sta V2EST
-        sta V2ATMR
+        sta V_EST,x
+        sta V_ATMR,x
         lda #$FF
-        sta V2APOS
+        sta V_APOS,x
+        cpx #0
+        bne @t2
+        inc NOTE2CNT
+        rts
+@t2:    inc NOTE3CNT
         rts
 
-v2_off:
-        lda V2EST
+lv_off:
+        lda V_EST,x
         beq @x
         lda #4
-        sta V2EST
+        sta V_EST,x
 @x:     rts
 
-v2_owns:                        ; Z clear (bne) when voice 2 owns ch3
+v2_owns:                        ; Z clear (bne) when slot 0 owns POKEY1 ch3
+        lda STEREO              ; stereo: never (it lives on POKEY2)
+        bne @no
         lda MUTEMEL
         bne @no
         lda T1USED
@@ -2169,112 +2330,179 @@ v2_owns:                        ; Z clear (bne) when voice 2 owns ch3
 @yes:   lda #1
         rts
 
-v2_step:
-        jsr v2_owns
-        bne @own
+lv_step:                        ; VBI, X = block
+        lda LSTATE
+        cmp #LS_PLAY
+        beq @pl
+        cmp #LS_DUB
+        bne @idle
+@pl:    lda MUTEMEL
+        bne @idle
+        lda STEREO
+        bne @st
+        cpx #0                  ; mono: slot 0 on POKEY1 ch3 if track 1
+        bne @x                  ;  has melody (else the layer keeps ch3)
+        lda T1USED
+        beq @x
+        ldy #$04
+        lda #0
+        beq @go
+@st:    ldy #P2                 ; stereo: slot 0 = POKEY2 ch1+2 16-bit,
+        lda #1                  ;         slot 1 = POKEY2 ch3 8-bit
+        cpx #0
+        beq @go
+        ldy #$04+P2
+        lda #0
+        beq @go
+@idle:  lda STEREO              ; POKEY2 voices must not hang on stop
+        beq @x
+        lda #0
+        cpx #0
+        bne @i1
+        sta AUDC1+P2
+        sta AUDC2+P2
         rts
-@own:   ldx V2PAR+8             ; chord
+@i1:    sta AUDC3+P2
+@x:     rts
+@go:    sty VT2                 ; AUDF register offset
+        sta VT3                 ; 1 = 16-bit pair
+        lda V_PAR+8,x           ; chord arpeggio
         beq @na
-        lda V2ATMR
+        sta VT0
+        lda V_ATMR,x
         beq @as
-        dec V2ATMR
+        dec V_ATMR,x
         bne @am
 @as:    lda #9
         sec
-        sbc V2PAR+9
-        sta V2ATMR
-        inc V2APOS
-@am:    lda V2APOS
-        cmp chord_len,x
+        sbc V_PAR+9,x
+        sta V_ATMR,x
+        inc V_APOS,x
+@am:    ldy VT0
+        lda V_APOS,x
+        cmp chord_len,y
         bcc @ai
         lda #0
-        sta V2APOS
+        sta V_APOS,x
 @ai:    clc
-        adc chord_start,x
+        adc chord_start,y
         tay
         lda chord_ofs,y
         jmp @of
 @na:    lda #0
 @of:    clc
-        adc V2NOTE
+        adc V_NOTE,x
         cmp #96
         bcc @nk
         lda #95
-@nk:    sta V2IDX
-        tax
-        lda V2PAR               ; wave -> pitch table
+@nk:    sta V_IDX,x
+        tay
+        lda VT3
+        bne @p16
+        lda V_PAR,x             ; 8-bit @64 kHz tables
         cmp #1
         beq @bz
         cmp #3
         beq @rs
-        lda lay64,x
+        lda lay64,y
         jmp @pf
-@bz:    lda buzz64,x
+@bz:    lda buzz64,y
         jmp @pf
-@rs:    lda rasp64,x
-@pf:    sta AUDF3
-        ; ADSR (same shape as the lead's, on V2PAR)
-        lda V2EST
+@rs:    lda rasp64,y
+@pf:    ldy VT2
+        sta AUDF1,y
+        jmp @env
+@p16:   lda V_PAR,x             ; 16-bit @1.79 MHz tables (as the lead)
+        cmp #1
+        beq @b16
+        cmp #3
+        beq @r16
+        lda pure_lo,y
+        sta VT0
+        lda pure_hi,y
+        jmp @w16
+@b16:   lda buzz_lo,y
+        sta VT0
+        lda buzz_hi,y
+        jmp @w16
+@r16:   lda rasp_lo,y
+        sta VT0
+        lda rasp_hi,y
+@w16:   ldy VT2
+        sta AUDF2,y
+        lda VT0
+        sta AUDF1,y
+        lda #0
+        sta AUDC1,y
+@env:   lda V_EST,x             ; ADSR (same shape as the lead's)
         bne @ev
         jmp @vo
 @ev:    cmp #1
         bne @e2
-        ldx V2PAR+1
+        ldy V_PAR+1,x
         clc
-        lda V2VLO
-        adc atk_lo,x
-        sta V2VLO
-        lda V2VHI
-        adc atk_hi,x
-        sta V2VHI
+        lda V_VLO,x
+        adc atk_lo,y
+        sta V_VLO,x
+        lda V_VHI,x
+        adc atk_hi,y
+        sta V_VHI,x
         cmp #15
         bcc @vo
         lda #15
-        sta V2VHI
+        sta V_VHI,x
         lda #0
-        sta V2VLO
+        sta V_VLO,x
         lda #2
-        sta V2EST
+        sta V_EST,x
         bne @vo
 @e2:    cmp #2
         bne @e3
-        ldx V2PAR+2
+        ldy V_PAR+2,x
         sec
-        lda V2VLO
-        sbc dec_lo,x
-        sta V2VLO
-        lda V2VHI
-        sbc dec_hi,x
-        sta V2VHI
+        lda V_VLO,x
+        sbc dec_lo,y
+        sta V_VLO,x
+        lda V_VHI,x
+        sbc dec_hi,y
+        sta V_VHI,x
         bcc @ts
-        cmp V2PAR+3
+        cmp V_PAR+3,x
         bcs @vo
 @ts:    lda #3
-        sta V2EST
+        sta V_EST,x
 @e3:    cmp #3
         bne @e4
-        lda V2PAR+3
-        sta V2VHI
+        lda V_PAR+3,x
+        sta V_VHI,x
         lda #0
-        sta V2VLO
+        sta V_VLO,x
         beq @vo
-@e4:    ldx V2PAR+4
+@e4:    ldy V_PAR+4,x
         sec
-        lda V2VLO
-        sbc dec_lo,x
-        sta V2VLO
-        lda V2VHI
-        sbc dec_hi,x
-        sta V2VHI
+        lda V_VLO,x
+        sbc dec_lo,y
+        sta V_VLO,x
+        lda V_VHI,x
+        sbc dec_hi,y
+        sta V_VHI,x
         bcs @vo
         lda #0
-        sta V2VHI
-        sta V2VLO
-        sta V2EST
-@vo:    ldx V2PAR
-        lda V2VHI
-        ora wavebits,x
-        sta AUDC3
+        sta V_VHI,x
+        sta V_VLO,x
+        sta V_EST,x
+@vo:    ldy V_PAR,x
+        lda wavebits,y
+        ora V_VHI,x
+        ldy VT2
+        pha
+        lda VT3
+        bne @c16
+        pla
+        sta AUDC1,y
+        rts
+@c16:   pla
+        sta AUDC2,y             ; the pair sounds on its high channel
         rts
 
 ; ---------------------------------------------------------------------------
@@ -2723,6 +2951,7 @@ cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
             .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1),>(toggle_mute-1)
 lsnames:    .byte "EMPTYREC  PLAY DUB  STOP DRUMS"
+titlewords: .byte "8-BIT KEYBOARDSTEREO 2-POKEY"
 qdemotxt:   .byte "< DEMOS  >"
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30,$32   ; 1..9, 0
 presetkey:  .byte "1234567890"

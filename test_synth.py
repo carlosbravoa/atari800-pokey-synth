@@ -14,14 +14,16 @@ for line in open("build/synth.lbl"):
 
 import re
 for line in open("synth.s"):
-    mm = re.match(r"^([A-Z_][A-Z0-9_]*)\s*=\s*(\$[0-9A-Fa-f]+|[A-Z_]+\+\d+)", line)
+    mm = re.match(r"^([A-Z_][A-Z0-9_]*)\s*=\s*(\$[0-9A-Fa-f]+|\d+|[A-Z_][A-Z0-9_]*(?:\+\d+)?)\b", line)
     if mm:
         v = mm.group(2)
         if v.startswith("$"):
             lbl[mm.group(1)] = int(v[1:], 16)
-        else:
-            b, o = v.split("+")
-            lbl[mm.group(1)] = lbl[b] + int(o)
+        elif v.isdigit():
+            lbl[mm.group(1)] = int(v)
+        elif v in lbl or v.split("+")[0] in lbl:
+            b, _, o = v.partition("+")
+            lbl[mm.group(1)] = lbl[b] + int(o or 0)
 
 
 def L(n):
@@ -112,7 +114,8 @@ def frame(key=None):
     call("kb_poll")
     call("loop_step")
     call("synth")
-    call("v2_step")
+    call("lv_step", x=0)
+    call("lv_step", x=20)
     call("drum_step")
     return w(L("OUTLO")), mem[L("VOLHI")], mem[L("ESTATE")]
 
@@ -401,6 +404,55 @@ check(mem[L("DEMOIDX")] == len(gd.DEMOS) - 1, "< steps back one")
 tap(BK)
 check(mem[L("DEMOIDX")] == 0 and mem[L("LSTATE")] == 0, "BACKSPACE clears the demo")
 for _ in range(3): frame(); main_frame()
+
+# 12. stereo (second POKEY forced on; py65's static RANDOM detects mono)
+check(mem[L("STEREO")] == 0, "py65 detects mono (RANDOM never changes)")
+tap(BK)
+call("select_preset", a=0)
+mem[L("STEREO")] = 1
+mem[0xD21F] = 0x04                     # a real POKEY2 has no key down
+tap(Q)                                 # '>' -> GROOVE
+name, S, N, p1, p2, t1, t2, dr = gd.DEMOS[0]
+while w(L("LPOSLO")) != 0: frame(); main_frame()
+cn = [mem[L(x)] for x in ("NOTE2CNT", "NOTE3CNT", "NOTECNT", "DRUMCNT")]
+seen = dict(p2pair=set(), p2c3=set(), p2d=0, p1c3=0, p1d=0)
+bass0 = t1[0][1]
+for f in range(N * S):
+    frame(); main_frame()
+    if f == 2:
+        per = mem[0xD210] | mem[0xD212] << 8
+        seen["bass"] = (per, mem[0xD213], mem[0xD211])
+    if mem[0xD215] & 0x0F: seen["p2c3"].add(mem[0xD215] & 0xF0)
+    if mem[0xD217] & 0x0F: seen["p2d"] += 1
+    if mem[0xD207] & 0x0F: seen["p1d"] += 1
+got = [(mem[L(x)] - cn[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTE3CNT", "NOTECNT", "DRUMCNT"))]
+check(got == [len(t1), len(t2), 0, sum(1 for v in dr if v)],
+      f"stereo pass: track1/track2/lead/drums {got}")
+bl = mem[L("buzz_lo") + bass0] | mem[L("buzz_hi") + bass0] << 8
+per, c2, c1 = seen["bass"]
+check(per == bl and c2 & 0xF0 == 0xC0 and c2 & 0x0F and c1 == 0,
+      f"track 1 bass on POKEY2 ch1+2 16-bit: period {per} (= buzz table {bl}), AUDC ${c2:02X}")
+check(seen["p2c3"] == {0xA0}, f"track 2 flute on POKEY2 ch3 (AUDC hi {seen['p2c3']})")
+check(seen["p2d"] > 0 and seen["p1d"] == 0, f"loop drums on POKEY2 ch4 only ({seen['p2d']} vs {seen['p1d']} frames)")
+check(mem[L("PRESET")] == 0, "the lead keeps the player's PIANO (track 2 has its own voice)")
+call("select_preset", a=1)             # ORGAN: layer stays on POKEY1 ch3
+for _ in range(4): frame(A)
+check(mem[0xD205] & 0x0F > 5 and mem[0xD204] == mem[L("lay64") + 48],
+      "POKEY1 ch3 keeps the lead's layer while the loop plays")
+for _ in range(30): frame()
+frame(C)
+for _ in range(3): frame()
+check(mem[0xD207] & 0x0F > 0, "a live kick sounds on POKEY1 ch4 over the loop")
+tap(TAB)
+for _ in range(3): frame()
+check(mem[0xD213] == 0 and mem[0xD215] == 0, "stop silences the POKEY2 voices")
+# passive fallback: key down but POKEY2's SKSTAT agrees -> mirror -> mono
+mem[0xD21F] = 0x00                     # (in py65 $D20F/$D21F are separate bytes)
+frame(A)
+check(mem[L("STEREO")] == 0, "a held key seen on both SKSTATs drops back to mono")
+mem[0xD21F] = 0x04
+for _ in range(20): frame()
+tap(BK)
 
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):

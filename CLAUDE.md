@@ -120,12 +120,45 @@ Edits are kept per preset (the `live` table) until RETURN.
   tables and demos, ending ~$4A43 (~1.5 KB free). Don't use `$A000+`: BASIC
   is still mapped when USR-launched from READY.
 
-## Later: dual POKEY
+## Stereo / dual POKEY (auto-detected, no toggle)
 
-The board has an OSD-toggled stereo second POKEY (`$D210`, right channel).
-Plan: an in-program toggle, only when detected, that moves the looper's
-voices (or a second melodic voice) onto POKEY2. That lifts the
-four-channel limit on overdubbing melody over melody.
+The program runs on any Atari. With one POKEY it behaves as the mono design
+above. When a second POKEY answers at `$D210` (this board: OSD stereo
+option, POKEY2 -> right HDMI channel; also stereo-upgraded real machines),
+it switches to expanded mode by itself:
+
+| | mono | stereo |
+|---|---|---|
+| live lead (16-bit), layer, live drums | POKEY1 ch1+2, ch3, ch4 | same (left) |
+| loop track 1 | POKEY1 ch3, 8-bit (layer yields) | POKEY2 ch1+2, **16-bit** (right) |
+| loop track 2 (overdub) | the lead (shares with live) | POKEY2 ch3, own voice |
+| loop drums | POKEY1 ch4 (live hit wins) | POKEY2 ch4 (independent) |
+| track 2's preset changes | switch the lead (PRESREQ) | load track 2's voice only |
+
+- **Detection** (`detect_stereo`: at startup before the VBI, and on every
+  ESC): put POKEY1 in run mode, write 0 to `$D21F`, sample POKEY1's RANDOM.
+  Stock hardware mirrors `$D21x` onto POKEY1, which is now in init, so
+  RANDOM freezes (mono). A real POKEY2 leaves POKEY1's RANDOM running
+  (stereo), and the routine then sets up POKEY2 (AUDCTL `$50`, silent). In
+  mono it never writes POKEY2 registers, since those writes would hit
+  POKEY1.
+- **Runtime fallback** (kb_poll): while a key is held, POKEY1's SKSTAT bit 2
+  is 0. POKEY2 has no keyboard, so its bit 2 must read 1. If `$D21F` agrees
+  with POKEY1, the addresses are mirrored again (the board's stereo was
+  switched off), so STEREO drops to 0. Switching stereo ON mid-session is
+  picked up by the next ESC.
+- The title shows `STEREO 2-POKEY` in place of `8-BIT KEYBOARD`.
+- Engines: `lv_step` (X = voice block 0/VBS) drives both loop voices,
+  choosing the output registers (Y offset) and 8/16-bit per mode.
+  `drum_one` (X = block 0/8, Y = register offset) drives both drum
+  channels. Voice and drum blocks live at `$0B40-$0B77`, and the old V2*
+  names are aliases.
+- Verified on hardware with the board's stereo ON: detection, the key-held
+  check staying stereo, and all six demos routed (track 2 on its own voice,
+  lead and preset untouched). Hardware tests are mode-aware. **Not yet seen
+  on hardware:** the stereo-off fallback, and mono after this refactor
+  (py65-covered). Switch OSD stereo off and rerun `hwtest.py`/`hwloop.py`/
+  `hwdemo.py` to check.
 
 ## Screen
 
@@ -146,15 +179,17 @@ $060A NOTE (0=C1)  $060B ESTATE 0 off 1 A 2 D 3 S 4 R  $060D VOLHI
 $060E/0F CURN  $0610/11 SWP  $0612/13 OUT (period in AUDF1/2)
 $0617 FRAME   $0619 NOTEIDX (incl. chord)  $061B REMKEY / $061C REMHOLD
   (remote test: poke a KBCODE into REMKEY, then frames into REMHOLD)
-$061D-21 drum engine  $0622 DRUMLIT  $0623 NOTECNT  $0624 DRUMCNT
+$0622 DRUMLIT  $0623 NOTECNT  $0624 DRUMCNT
 $0625 KEYCNT  $0627 GATE  $0630-3B PARAMS (live sound)  $063D PARKREQ
-$0643 UICNT (main-loop liveness)  $0644 DCLK
+$0643 UICNT (main-loop liveness)
 $0645 LOGPOS  $0646 LOGN  $0647 LASTKB  $0648 LASTSK
 $0649 LSTATE 0 empty 1 rec 2 play 3 dub 4 stop  $064A LCMD
 $064B/4C LPOS  $064D/4E LLEN  $064F LCELL (bar 0-16)
 $0652-54 LIVEM/LIVED/LIVEP  $0655 PRESREQ  $0658 LOOPCNT (+1 per wrap)
-$0659 V2PRE  $065A V2NOTE  $065B V2EST  $065D V2VHI  $0660 V2IDX
-$0661-6C V2PAR  $066D NOTE2CNT (+1 per voice-2 note)  $066E T1USED
+$066D NOTE2CNT (+1 per track-1 note)  $066E T1USED  $066F DEMOIDX
+$0671 MUTEMEL  $0672 NOTE3CNT (+1 per track-2 note in stereo)
+$0673 STEREO (1 = second POKEY detected)
+(voice/drum engine state moved to $0B40-$0B77; $065x/$0661 are free)
 $0A40-$0B3F key logger: 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C),
   written by wait_frame on every raw register change (sk $08 = key down,
   $0C = up; bit 3 = shift). Read it after a real-keyboard test.
@@ -170,6 +205,7 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$0680-$0690` | hot-swap trampoline + RTI stub |
 | `$0A00-$0A3F` | echo ring |
 | `$0A40-$0B3F` | key logger |
+| `$0B40-$0B77` | loop voice blocks (2 x 20) + drum blocks (2 x 8) |
 | `$5000-$9FFF` | looper lanes (M1, drums, P1, M2, P2) |
 | `$F0-$F1` | VBI lane pointer (ZP exception) |
 | `$2000-$3BFF` | code + data (MAIN cap) |

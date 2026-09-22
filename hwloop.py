@@ -16,8 +16,8 @@ def check(c, msg):
 
 
 def st(l):
-    b = l.peek(0x0600, 0x70)
-    return dict(ls=b[0x49], pos=b[0x4B] | b[0x4C] << 8, len=b[0x4D] | b[0x4E] << 8,
+    b = l.peek(0x0600, 0x75)
+    return dict(stereo=b[0x73], t2=b[0x72], preset=b[0x00], ls=b[0x49], pos=b[0x4B] | b[0x4C] << 8, len=b[0x4D] | b[0x4E] << 8,
                 notes=b[0x6D], lead=b[0x23], drums=b[0x24], loops=b[0x58],
                 cell=b[0x4F])
 
@@ -84,9 +84,10 @@ with AtariLink() as l:
     loops = (b['loops'] - a['loops']) & 255
     check((b['drums'] - a['drums']) & 255 == loops * len(hits),
           f"{loops} passes x {len(hits)} drums = {(b['drums']-a['drums'])&255} hits")
-    check((b['lead'] - a['lead']) & 255 == loops and (b['notes'] - a['notes']) & 255 == loops,
-          f"{loops} passes: track 1 on voice 2 x{(b['notes']-a['notes'])&255}, "
-          f"track 2 on lead x{(b['lead']-a['lead'])&255}")
+    t2key = 't2' if b['stereo'] else 'lead'
+    check((b[t2key] - a[t2key]) & 255 == loops and (b['notes'] - a['notes']) & 255 == loops,
+          f"{loops} passes ({'stereo' if b['stereo'] else 'mono'}): track 1 x{(b['notes']-a['notes'])&255}, "
+          f"track 2 on {t2key} x{(b[t2key]-a[t2key])&255}")
     tap(l, TAB, 0.3)
     a = st(l); time.sleep(L / 60 + 0.3); b = st(l)
     check(a['ls'] == 4 and b['drums'] == a['drums'] and b['notes'] == a['notes'],

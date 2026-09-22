@@ -20,7 +20,8 @@ def check(c, msg):
 
 
 with AtariLink() as l:
-    st = lambda: l.peek(0x0600, 0x72)
+    print("mode:", "STEREO" if l.peek(0x0673, 1)[0] else "mono")
+    st = lambda: l.peek(0x0600, 0x75)
     l.key(ESC, hold_ms=100); time.sleep(0.4)          # throwaway first key
     l.key(BKSP, hold_ms=100); time.sleep(0.4)
     for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
@@ -36,9 +37,12 @@ with AtariLink() as l:
         while (st()[0x58] - a[0x58]) & 255 < 1:
             pass
         z = st()
-        got = [(z[i] - a[i]) & 255 for i in (0x6D, 0x23, 0x24)]
-        want = [len(t1), len(t2), sum(1 for v in dr if v)]
-        check(got == want, f"  one pass voice2/lead/drums {got} (want {want})")
+        stereo = z[0x73]
+        got = [(z[i] - a[i]) & 255 for i in (0x6D, 0x72, 0x23, 0x24)]
+        want = [len(t1), len(t2) if stereo else 0, 0 if stereo else len(t2),
+                sum(1 for v in dr if v)]
+        check(got == want, f"  one pass track1/track2-voice/lead/drums {got} "
+                           f"(want {want}, {'stereo' if stereo else 'mono'})")
         print("  " + l.screen().split("\n")[10].strip())
     l.key(Q, hold_ms=100); time.sleep(0.5)
     check(st()[0x6F] == 1, "> wraps to GROOVE")
@@ -57,8 +61,8 @@ with AtariLink() as l:
     while (st()[0x58] - a[0x58]) & 255 < 1:
         pass
     z = st()
-    got = [(z[i] - a[i]) & 255 for i in (0x6D, 0x23, 0x24)]
-    check(got == [0, 0, 16] and z[0] == 0, f"  muted pass voice2/lead/drums {got}, preset {z[0]}")
+    got = [(z[i] - a[i]) & 255 for i in (0x6D, 0x72, 0x23, 0x24)]
+    check(got == [0, 0, 0, 16] and z[0] == 0, f"  muted pass {got}, preset {z[0]}")
     l.key(MUTE, hold_ms=100); time.sleep(0.4)
     check(st()[0x71] == 0, "Q again -> melodies back (left playing)")
 print("ALL PASS" if ok else "SOME FAILED")
