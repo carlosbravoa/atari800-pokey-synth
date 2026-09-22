@@ -119,6 +119,11 @@ def main():
             print("released trampoline")
         else:
             cmd = usr_command(entry)
+            # a bare RETURN first: text already on the cursor line (e.g. a
+            # word typed at READY) would otherwise prefix the command and
+            # BASIC answers ERROR instead of launching
+            l.type_text("\n")
+            time.sleep(0.4)
             l.type_text(cmd + "\n")
             print(f"typed launch: {cmd}")
 

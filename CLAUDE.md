@@ -231,12 +231,13 @@ demo, add a `demo(...)` call. The py65 and hardware tests pick it up.
 `demo_loop.py` is the original PC-side poke of GROOVE, kept as an example
 of driving the lanes from the PC.
 
-## Open issue (2026-09-22)
+## Cold launch gotcha (resolved 2026-09-22)
 
-One cold USR launch hung: black screen, FRAME stuck at 1. It happened after
-the user pressed RESET on a running synth by mistake. A fresh reboot and
-redeploy worked, and a py65 cold start with dirty RAM runs clean. If it
-recurs, dump `$0600-$06FF` and the code range before resetting.
+Two "hangs" after a manual reset turned out to be the typed USR command
+landing on a line that already had text (e.g. `RESETED`). BASIC answered
+ERROR and the program never started, which showed as FRAME stuck at 0.
+`deploy.py` now sends a bare RETURN before the launch line. If FRAME isn't
+ticking after a USR launch, check the screen for `ERROR-` first.
 
 ## Not verified by machine
 
