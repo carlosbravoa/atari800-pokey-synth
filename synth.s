@@ -241,6 +241,7 @@ D_DLT    = DB+2
 D_CTL    = DB+3
 D_VSH    = DB+4
 D_CLK    = DB+5
+D_SEQ    = DB+6             ; scripted drum: index into drseq (0 = envelope drum)
 ; POKEY register image, both chips: the VBI engines write here and
 ; pokey_out copies it at the end of the VBI (POKEY registers are write-only,
 ; so the image is what makes mirroring POKEY1 onto POKEY2 possible)
@@ -1925,7 +1926,12 @@ drum_start:                     ; A = drum, X = block (0 live / 8 loop)
         sta D_CLK,x
         lda dr_len,y
         sta D_TMR,x
-        rts
+        lda dr_seq,y            ; scripted (frame-by-frame register) drum?
+        sta D_SEQ,x
+        beq @e
+        lda #$FF                ; "sounding" until its script ends
+        sta D_TMR,x
+@e:     rts
 
 drum_step:                      ; VBI: block 0 on POKEY1 ch4, block 8 on POKEY2
         ldx #0
@@ -1945,8 +1951,29 @@ drum_step:                      ; VBI: block 0 on POKEY1 ch4, block 8 on POKEY2
 
 drum_one:                       ; X = block, Y = AUDF register offset
         lda D_TMR,x
-        beq @off
-        dec D_TMR,x
+        bne @on
+        jmp @off
+@on:    lda D_SEQ,x
+        beq @env
+        sty VT0                 ; script: one (AUDF, AUDC) pair per frame,
+        ldy D_SEQ,x             ;  AUDC 0 ends it
+        lda drseq,y
+        beq @send
+        sta VT1
+        lda drseq-1,y
+        ldy VT0
+        sta SAUDF1,y
+        lda VT1
+        sta SAUDC1,y
+        inc D_SEQ,x
+        inc D_SEQ,x
+        rts
+@send:  sta D_SEQ,x
+        sta D_TMR,x
+        ldy VT0
+        sta SAUDC1,y
+        rts
+@env:   dec D_TMR,x
         lda D_CLK,x             ; attack transient: one frame of loud noise
         beq @body
         sta SAUDF1,y
@@ -3311,6 +3338,18 @@ dr_ctl:     .byte $C0,$80,$80,$80,$A0,$A0,$80,$80
 dr_vsh:     .byte  0,  0,  0,  2,  1,  1,  0,  3
 dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
+dr_seq:     .byte  2,  0,  0,  0,  0,  0,  0,  0     ; script index (0 = envelope)
+; scripted drums: (AUDF, AUDC) per frame, AUDC 0 ends. Kick = the classic
+; POKEY "battery kick": DC pop (volume-only) -> pure beater click -> deep
+; poly4 thud dropping in pitch and volume.
+drseq:      .byte 0
+            .byte $00,$1F       ; volume-only 15: the speaker "pop"
+            .byte $20,$AF       ; pure tone, high: beater click
+            .byte $D0,$CF       ; poly4 at ~20 Hz: the shell thud
+            .byte $E0,$CB
+            .byte $F0,$C8       ; sub-bass tail
+            .byte $F8,$C4
+            .byte $00,$00
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
             .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT,K_Q,K_R

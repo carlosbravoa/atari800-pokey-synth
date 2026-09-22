@@ -203,11 +203,13 @@ for _ in range(60):
 
 # 6. drums: kick sweeps AUDF4 upward, counts, lights
 frame(C)
-f4 = []
-for _ in range(12):
-    f4.append(mem[0xD206])
+kick = [(mem[0xD206], mem[0xD207])]
+for _ in range(7):
     frame(C)
-check(mem[L("DRUMCNT")] == 1 and f4[-1] > f4[0], f"kick AUDF4 {f4[:6]}")
+    kick.append((mem[0xD206], mem[0xD207]))
+want = [(0x00, 0x1F), (0x20, 0xAF), (0xD0, 0xCF), (0xE0, 0xCB), (0xF0, 0xC8), (0xF8, 0xC4)]
+check(mem[L("DRUMCNT")] == 1 and kick[:6] == want and kick[6][1] == 0,
+      f"battery kick script: {[f'{f:02X}/{c:02X}' for f, c in kick[:7]]}")
 main_frame()
 for _ in range(20):
     frame()
@@ -558,7 +560,7 @@ for key, root, t3, t5, nm in ((A, 36, 40, 43, "C major"), (DK, 40, 43, 47, "E mi
     for _ in range(30): frame()
 for _ in range(3): frame(A)
 frame(C)                                # kick takes ch4
-check(mem[0xD207] & 0xF0 == 0x80 or mem[0xD207] & 0xF0 == 0xC0, "a drum hit takes ch4 over the chord")
+check(mem[0xD207] & 0xF0 in (0x10, 0x80, 0xC0), "a drum hit takes ch4 over the chord")
 for _ in range(20): frame(A)
 check(mem[0xD206] == lay(43) and mem[0xD207] & 0x0F > 0, "the fifth returns to ch4 after the drum")
 for _ in range(30): frame()

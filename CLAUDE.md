@@ -74,6 +74,13 @@ Edits are kept per preset (the `live` table) until RETURN.
   click (`dr_clk` AUDF) as the attack transient. Keep hat noise at AUDF ≥3:
   AUDF 0-1 noise is mostly above what a TV speaker reproduces (was
   "almost inaudible").
+- **Scripted drums**: a drum with `dr_seq` != 0 plays `drseq` frame by
+  frame, as (AUDF, AUDC) pairs with AUDC 0 ending it, instead of the
+  envelope. The kick is the classic POKEY "battery kick": a volume-only
+  `$1F` DC pop, a pure `$AF`/AUDF `$20` beater click, then poly4 `$CF` ->
+  `$C4` at AUDF `$D0`-`$F8` (~20 Hz and falling), 6 frames total. Tweak
+  the table to reshape it. The old swept-buzz kick values are still in
+  `dr_*[0]` (set `dr_seq[0]` to 0 to get it back).
 - **Keyboard**: OS key/break IRQs are disabled. The VBI polls KBCODE +
   SKSTAT bit 2 (held), so notes gate on press and release. New presses are
   posted to the main thread (KEYEV/KEYSEQ). Legato: with GLIDE > 0 a new note
