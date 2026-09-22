@@ -148,7 +148,11 @@ python3 test_psq.py                           # format unit tests (no Atari)
   then delta-coded events. Polyphony = simultaneous tracks; each track is
   monophonic. `to_commands` folds a stereo file for a mono machine (drops
   track 2, merges drum channel 1) and reports how many events that cost.
-- **Player** (`pcplay.py`): fills the ring ~90 frames ahead, so link jitter
+- **Write the ring in batches**: up to 64 events (256 bytes) per poke. One
+  poke per event (~25 ms) cannot keep up with dense passages: the ring runs
+  dry mid-song and the sounding note hangs. The player counts underruns and
+  always sends an all-off on exit/error.
+- **Player** (`pcplay.py`): fills the ring ~120 frames ahead, so link jitter
   never reaches the music; `--loop` re-times the next pass seamlessly;
   Ctrl-C stops and silences.
 - `compose_anthem.py` also writes `songs/anthem.psq`: the same arrangement

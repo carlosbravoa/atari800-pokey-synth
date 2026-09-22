@@ -6,7 +6,10 @@
 The synth's VBI keeps a 16-bit frame clock (SFRAME) and a 256-entry ring of
 (frame, command, arg). This script writes events into the ring ahead of
 time; the VBI runs each on the frame it's due, so link jitter never reaches
-the music. Default lead-in is 90 frames (~1.5 s); --lead sets it.
+the music. Default lead-in is 120 frames (~2 s); --lead sets it.
+
+Events go in batches of up to 64 per poke: one poke per event (~25 ms each)
+could not keep up with dense passages, the ring ran dry and a note hung.
 
 A stereo file on a mono machine drops its third track and folds the second
 drum channel into the first (it says how many events that cost).
@@ -22,7 +25,8 @@ from loopfile import AtariLink
 SRING = 0x1C00
 STREAMON, SHEAD, STAIL, SFRAME, SEVCNT = 0x0BA7, 0x0BA8, 0x0BA9, 0x0BAA, 0x0BAC
 RING = 256
-LEAD = 90                       # frames of lead-in / how far ahead we fill
+LEAD = 120                      # frames of lead-in / how far ahead we fill
+CHUNK = 64                      # events per poke (64 x 4 = 256 bytes)
 
 
 def play(path, loop=False, lead=LEAD, quiet=False):
@@ -54,7 +58,7 @@ def play(path, loop=False, lead=LEAD, quiet=False):
             return int.from_bytes(lf.peek(l, SFRAME, 2), "little")
 
         queue = [(f + base, c, a) for f, c, a in cmds]
-        passes = 0
+        passes, under = 0, 0
         tail, started = 0, False
         try:
             while True:
@@ -62,8 +66,10 @@ def play(path, loop=False, lead=LEAD, quiet=False):
                     head = lf.peek(l, SHEAD, 1)[0]
                     free = (head - tail - 1) & (RING - 1)
                     now = frame_now()
+                    if started and head == tail and queue[0][0] <= now:
+                        under += 1          # the ring ran dry: we were too slow
                     batch = []
-                    while queue and len(batch) < free and queue[0][0] - now < lead * 2:
+                    while queue and len(batch) < free and queue[0][0] - now < lead * 3:
                         batch.append(queue.pop(0))
                     if not batch:
                         if not started:
@@ -71,10 +77,14 @@ def play(path, loop=False, lead=LEAD, quiet=False):
                             started = True
                         time.sleep(0.05)
                         continue
-                    for f, c, a in batch:       # the ring wraps every 256
-                        l.poke(SRING + tail * 4,
-                               bytes([f & 255, (f >> 8) & 255, c, a]))
-                        tail = (tail + 1) & (RING - 1)
+                    i = 0                   # write whole runs: one poke per 64
+                    while i < len(batch):   #  events, never crossing the wrap
+                        run = min(len(batch) - i, RING - tail, CHUNK)
+                        pay = b"".join(bytes([f & 255, (f >> 8) & 255, c, a])
+                                       for f, c, a in batch[i:i + run])
+                        l.poke(SRING + tail * 4, pay)
+                        tail = (tail + run) & (RING - 1)
+                        i += run
                     l.poke(STAIL, bytes([tail]))
                     if not started:
                         l.poke(STREAMON, bytes([1]))
@@ -95,12 +105,18 @@ def play(path, loop=False, lead=LEAD, quiet=False):
                 time.sleep(0.1)
             if not quiet:
                 print(f"done: {lf.peek(l, SEVCNT, 1)[0]} events executed (mod 256), "
-                      f"{passes} pass(es)")
-        except KeyboardInterrupt:
-            l.poke(STREAMON, bytes([0]))
+                      f"{passes} pass(es)"
+                      + (f", {under} underruns (raise --lead)" if under else ""))
+        except (KeyboardInterrupt, Exception) as e:
+            l.poke(STREAMON, bytes([0]))        # never leave a note hanging
             l.poke(STAIL, lf.peek(l, SHEAD, 1))
+            l.poke(SRING, bytes([0, 0, 12, 0])) # all-off, due immediately
+            l.poke(SHEAD, bytes([0, 1]))
+            l.poke(STREAMON, bytes([1]))
+            time.sleep(0.1)
+            l.poke(STREAMON, bytes([0]))
             l.poke(0x064A, bytes([4]))          # silence the synth
-            print("\nstopped")
+            print("\nstopped" if isinstance(e, KeyboardInterrupt) else f"\nstopped: {e}")
 
 
 def main():
