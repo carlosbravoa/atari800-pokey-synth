@@ -3340,12 +3340,12 @@ dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 dr_seq:     .byte  2,  0,  0,  0,  0,  0,  0,  0     ; script index (0 = envelope)
 ; scripted drums: (AUDF, AUDC) per frame, AUDC 0 ends. Kick = the classic
-; POKEY "battery kick": DC pop (volume-only) -> pure beater click -> deep
-; poly4 thud dropping in pitch and volume.
+; POKEY "battery kick": DC pop (volume-only) -> deep poly4 thud dropping in
+; pitch and volume.
 drseq:      .byte 0
             .byte $00,$1F       ; volume-only 15: the speaker "pop"
-            .byte $20,$AF       ; pure tone, high: beater click
-            .byte $D0,$CF       ; poly4 at ~20 Hz: the shell thud
+            .byte $C0,$CF       ; poly4, falling: the shell thud (no pure-tone
+            .byte $D0,$CF       ;  "beater" frame: at AUDF $20 it's a ~1 kHz beep)
             .byte $E0,$CB
             .byte $F0,$C8       ; sub-bass tail
             .byte $F8,$C4
