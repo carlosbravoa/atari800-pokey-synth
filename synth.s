@@ -2858,7 +2858,8 @@ synth:
         lda #0
         sta VT3
 
-@out:   lda VT2
+@out:   jsr coprime             ; buzz: vibrato/glide/sweep may land on a bad period
+        lda VT2
         sta OUTLO
         sta SAUDF1
         lda VT3
@@ -3065,6 +3066,47 @@ poly_pitch:                     ; A = semitones above NOTE -> 8-bit AUDF
 @rs:    lda rasp64,y
         rts
 
+; BUZZ (poly4) only has its pitch when (period+7) is coprime to 15; the
+; tables guarantee that, but vibrato/glide/sweep move the period through the
+; bad values (the pattern shortens: octave+ jumps, or silence when the gcd
+; is 15). Nudge VT2/VT3 up 1-2 steps to the next good value. The residue
+; needs no division: 256 == 16 == 1 (mod 15), so bytes and nibbles just add.
+coprime:
+        lda P_WAVE
+        cmp #1
+        bne @x
+@again: lda VT2
+        clc
+        adc VT3
+        bcc @n1
+        adc #0                  ; carry = 256 == 1 (mod 15): +1
+@n1:    clc
+        adc #7
+        bcc @n2
+        adc #0
+@n2:    pha
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        sta VT0
+        pla
+        and #15
+        clc
+        adc VT0                 ; <= 30
+        cmp #15
+        bcc @n3
+        sbc #15
+@n3:    tax
+        lda bad15,x
+        beq @x
+        inc VT2
+        bne @again
+        inc VT3
+        jmp @again
+@x:     rts
+bad15:  .byte 1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1   ; r%3==0 or r%5==0 (15 == 0)
+
 ; End of VBI: the image -> POKEY1; in stereo, POKEY2 either gets the loop's
 ; own voices (PLAY/DUB) or, when it's otherwise idle, a mirror of POKEY1 with
 ; the lead a few cents flat on the right: a centered, slightly wide sound for
@@ -3087,6 +3129,11 @@ pokey_out:
         sta AUDF1+P2,x
         dex
         bpl @m
+        lda P_WAVE              ; buzz/rasp: no detune (it would break the poly
+        cmp #1                  ;  pattern: silence or octave jumps); identical
+        beq @x                  ;  copy = centered
+        cmp #3
+        beq @x
         clc                     ; lead period + period/256 (~7 cents flat)
         lda SAUDF1
         adc SAUDF2

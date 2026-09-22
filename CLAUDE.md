@@ -55,6 +55,12 @@ Edits are kept per preset (the `live` table) until RETURN.
   by their poly periods (15/31, N+7 kept coprime). Good through octave 4;
   up to ~1 semitone off at the very top. GRIT/NOISE/HISS use the pure table
   (pitch = noise color).
+- **Buzz coprime guard**: `coprime` runs on the lead's final period. It
+  nudges it up 1-2 steps until (P+7) is coprime to 15, because vibrato,
+  glide and sweep otherwise pass through bad periods (octave jumps /
+  silence). It computes mod 15 by adding bytes and nibbles (256 == 16 == 1
+  mod 15), with no division. RASP (mod 31) isn't guarded on the lead: no
+  preset uses it with vibrato.
 - **Per-frame pipeline (VBI `synth`)**: chord arpeggio -> table period ->
   glide (exponential, `>>GLIDE`) -> sweep (absolute period `SWP`,
   `±SWP>>shift`, clamped) -> vibrato (±(P>>7)·depth on an 8-step triangle) ->
@@ -254,6 +260,9 @@ it switches to expanded mode by itself:
   STOP), `pokey_out` mirrors POKEY1 onto it: layer, chord tones and drums
   identical, and the lead's period + period/256 (~7 cents flat on the
   right). The result is a centered, slightly wide chorus for solo playing.
+  BUZZ/RASP get no detune: the pitch of these poly waves needs
+  gcd(period+7, 15 or 31) = 1, and period + period/256 broke that for
+  most BASS/SYNTH keys (C2 silent, others 2-3 octaves up on the right).
   In PLAY/DUB, POKEY2 carries the loop as before. Only the sound changes;
   recording stores notes, not registers.
 - **Register image**: the VBI engines (synth, poly_out, lv_step, drum_one)

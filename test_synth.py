@@ -477,6 +477,25 @@ check(mem[L("LSTATE")] == 2 and per2 == pure36,
 for _ in range(40): frame()
 tap(BK)
 call("select_preset", a=0)
+# buzz stays in tune on both sides: every output period coprime, no detune
+from math import gcd
+KEYS = [0x3F, 0x2E, 0x3E, 0x2A, 0x3A, 0x38, 0x2D, 0x3D, 0x2B, 0x39, 0x0B, 0x01,
+        0x05, 0x08, 0x00, 0x0A, 0x02]
+for pre, name in ((4, "BASS"), (6, "SYNTH")):
+    call("select_preset", a=pre)
+    bad, diff = [], []
+    for k in KEYS:
+        for f in range(24):                  # vibrato/glide sweep across frames
+            frame(k)
+            p1 = mem[0xD200] | mem[0xD202] << 8
+            p2 = mem[0xD210] | mem[0xD212] << 8
+            if gcd(p1 + 7, 15) > 1: bad.append((k, f, p1))
+            if p2 != p1: diff.append((k, f, p1, p2))
+        for _ in range(3): frame()
+    check(not bad and not diff, f"{name}: all 17 keys x 24 frames coprime, right == left "
+                                f"(bad {bad[:3]}, differ {diff[:3]})")
+    for _ in range(40): frame()
+call("select_preset", a=0)
 # passive fallback: key down but POKEY2's SKSTAT agrees -> mirror -> mono
 mem[0xD21F] = 0x00                     # (in py65 $D20F/$D21F are separate bytes)
 frame(A)
