@@ -43,9 +43,10 @@ The first key() of a link session is often lost; send a throwaway first.
 | `BACKSPACE` | looper: clear |
 | `R` | held chords on/off for this preset: CHORD = AUTO, CHD SPD = POLY (RETURN restores) |
 | `Q` | drums only: mute the loop's melody tracks (any loop or demo) and keep your own sound |
+| SHIFT `SPACE` | recording grid on/off (metronome + snap + whole-bar loops) |
 | `I` | undo the last overdub pass (restores what it wrote, including overwritten hits) |
 | `HELP` (PC F5 / Insert) | full-screen key list; any key returns |
-| SHIFT `<` `>` | demo tempo: slower / faster (reloads the demo; `S=nn` on row 9) |
+| SHIFT `<` `>` | tempo: a loaded demo's, else the recording grid (`S=nn` on row 9, inverse = grid on) |
 | `<` `>` (PC `-` `=`) | built-in demo loops: previous / next (loads + plays; jam or overdub on it) |
 
 Edits are kept per preset (the `live` table) until RETURN.
@@ -199,6 +200,30 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
     MAJOR.
 - `R` toggles AUTO+POLY on the current preset (kept in `live`, RETURN
   restores).
+
+## Recording grid (metronome, snap, whole bars)
+
+- **Grid** = 16th notes of RSTEP `$0BA0` frames (default 8 = ~112 BPM;
+  SHIFT `<` `>` sets it when no demo is loaded). GRIDON `$0BA5` (SHIFT
+  SPACE) turns the whole thing off for free-time recording.
+- **Count-in**: SPACE from EMPTY goes to LS_CNT (5, shown as `COUNT`),
+  one bar of clicks, then REC from frame 0. SPACE/TAB during it cancel.
+- **Metronome**: `grid_step` clicks every 4 steps (accent = tom2 on the
+  bar line, hat elsewhere) during count-in, REC and DUB. It calls
+  `drum_start`, not `drum_trig`, so it never reaches LIVED and is never
+  recorded.
+- **Snap**: `grid_step` also sets SNAPD, the signed distance to the
+  nearest step (no division: STEPPOS counts frames since the last step).
+  Note-ons and drums are written at VP + SNAPD (`snap_vp`/`unsnap_vp`,
+  which is also what `undo_push` logs). Note-offs keep their real timing,
+  so phrasing survives.
+- **Whole bars**: `lp_bars` rounds LLEN at close to BARN x 16 x RSTEP
+  (rounding up from half a bar, minimum one bar), so loops, overdubs and
+  song sections line up. Events past the rounded end are dropped.
+- Tests: py65 covers count-in length, the 4 clicks, snapped note-ons,
+  whole-bar length, the clicks staying out of the drum lane, and the
+  grid-off path. Tests 9-15 set GRIDON = 0, since they record
+  free-time loops with exact expectations.
 
 ## Undo, tempo, help
 

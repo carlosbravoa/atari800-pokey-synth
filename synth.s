@@ -263,6 +263,14 @@ CURS     = $0B9C        ; frames per step of the loaded demo (0 = not a demo)
 LASTS    = $0B9D        ; main: as drawn
 TEMPO    = $0B9E        ; demo tempo offset, signed -4..+4 (SHIFT + < >)
 HELPON   = $0B9F        ; 1 = the help screen is up
+; recording grid: metronome, snap-to-16ths, whole-bar loops
+RSTEP    = $0BA0        ; frames per 16th step while recording (4-14)
+STEPPOS  = $0BA1        ; frames since the last grid step
+SNAPD    = $0BA2        ; signed: frames to the nearest grid step
+GRIDST   = $0BA3        ; step within the bar (0-15)
+BARN     = $0BA4        ; bars recorded so far
+GRIDON   = $0BA5        ; 1 = metronome + snap + whole-bar loops
+LS_CNT   = 5            ; counting in (one bar of clicks before REC)
 UPTR     = $F2          ; VBI-owned ZP (with VP $F0-$F1)
 K_I      = $0D          ; undo
 K_HELP   = $11
@@ -517,6 +525,10 @@ start:
 @vz:    sta VB,x
         dex
         bpl @vz
+        lda #8                  ; recording grid: 8 frames/16th (~112 BPM)
+        sta RSTEP
+        lda #1
+        sta GRIDON
         jsr detect_stereo
         lda #7
         ldx #>vbi
@@ -655,9 +667,12 @@ handle_key:
         rts
 @pr:    txa
         jmp select_preset
-@go:    lda SHIFTF              ; SHIFT + < > = demo tempo
+@go:    lda SHIFTF              ; SHIFT + < > = tempo, + SPACE = grid
         beq @d
-        cpx #11                 ; cmdkeys: 11 = '<', 12 = '>'
+        cpx #8                  ; cmdkeys: 8 = SPACE
+        bne @t
+        jmp toggle_grid
+@t:     cpx #11                 ; 11 = '<', 12 = '>'
         beq @slow
         cpx #12
         bne @d
@@ -836,13 +851,27 @@ loop_clear:
         sta DEMOIDX
         rts
 
+.segment "EXTRA"
 ; ---- built-in demos: < > step through them; each loads and plays ---------
 tempo_down:                     ; slower = more frames per step
         ldx #1
         bne tempo
 tempo_up:
         ldx #$FF
-tempo:  txa
+tempo:  ldy DEMOIDX
+        bne @demo
+        txa                     ; no demo: set the recording grid instead
+        clc
+        adc RSTEP
+        cmp #4
+        bcc @x
+        cmp #15
+        bcs @x
+        sta RSTEP
+        lda #$FE
+        sta LASTS
+        rts
+@demo:  txa
         clc
         adc TEMPO
         cmp #$FC                ; -4
@@ -851,7 +880,6 @@ tempo:  txa
         beq @x
         sta TEMPO
         ldx DEMOIDX             ; reload the demo at the new tempo
-        beq @x
         jmp load_demo
 @x:     rts
 
@@ -1013,6 +1041,8 @@ load_track:                     ; A = lane page; events until $FF
         jmp @e
 @x:     lda ZT2
         rts
+.segment "CODE"
+
 
 clear_lanes:
         lda #>MLANE
@@ -1203,7 +1233,11 @@ ui_update:
         sta DISPNOTE
         jsr draw_note
 @m:     lda LSTATE              ; PLAY + muted shows as DRUMS (name 5)
-        cmp #LS_PLAY
+        cmp #LS_CNT
+        bne @m0
+        lda #6                  ; counting in
+        bne @m1
+@m0:    cmp #LS_PLAY
         bne @m1
         ldx MUTEMEL
         beq @m1
@@ -1249,21 +1283,27 @@ ui_update:
         inx
         cpx #16
         bne @lb
-@mv:    lda DEMOIDX             ; demo step length (tempo), row 9
-        bne @s1
-        lda #0
-        beq @s2
-@s1:    lda CURS
+@mv:    lda DEMOIDX             ; step length: the demo's, else the grid
+        beq @s1
+        lda CURS
+        bne @s2
+@s1:    lda RSTEP
 @s2:    cmp LASTS
         beq @st
         sta LASTS
-        beq @sbl
+        sta VT5
         ldy #0
+        lda GRIDON              ; inverse = metronome + snap are on
+        beq @s3
+        ldy #$80
+@s3:    sty ZATTR
         lda #'S'-32
+        ora ZATTR
         sta SCREEN+9*40+35
         lda #'='-32
+        ora ZATTR
         sta SCREEN+9*40+36
-        lda CURS
+        lda VT5
         ldx #0
 @sd:    cmp #10
         bcc @sw
@@ -1273,16 +1313,12 @@ ui_update:
 @sw:    pha
         txa
         ora #$10
+        ora ZATTR
         sta SCREEN+9*40+37
         pla
         ora #$10
+        ora ZATTR
         sta SCREEN+9*40+38
-        jmp @st
-@sbl:   lda #0
-        ldx #3
-@sc:    sta SCREEN+9*40+35,x
-        dex
-        bpl @sc
 @st:    lda STEREO
         cmp LASTSTE
         beq @md
@@ -2205,12 +2241,23 @@ loop_step:
         stx LCMD
         jsr loop_cmd
 @run:   lda LSTATE
+        cmp #LS_CNT
+        beq lp_count
         cmp #LS_REC
         beq lp_rec
         cmp #LS_PLAY
-        beq lp_play
+        beq @pl
         cmp #LS_DUB
-        beq lp_play
+        bne lp_clear
+@pl:    jmp lp_play
+lp_count:                       ; one bar of clicks, then record on the downbeat
+        jsr grid_step
+        lda BARN
+        beq lp_clear
+        jsr grid_reset
+        jsr lp_rewind
+        lda #LS_REC
+        sta LSTATE
 lp_clear:
         lda #0
         sta LIVEM
@@ -2218,19 +2265,38 @@ lp_clear:
         sta LIVEP
         rts
 
-lp_rec: jsr lp_ptr
+lp_rec: jsr grid_step             ; SNAPD + metronome + bar count
+        jsr lp_ptr
         ldy #0
         lda LIVEM
-        sta (VP),y
         beq @nm
-        sta T1USED
-@nm:    jsr lp_next
-        lda LIVED
+        cmp #$FE
+        beq @off                ; note-offs keep their real timing
+        sta VT4
+        jsr snap_vp
+        lda VT4
+        ldy #0
         sta (VP),y
+        sta T1USED
+        jsr unsnap_vp
+        jmp @nm
+@off:   sta (VP),y
+@nm:    ldy #0
+        jsr lp_next
+        lda LIVED
+        beq @nd
+        sta VT4
+        jsr snap_vp
+        lda VT4
+        ldy #0
+        sta (VP),y
+        jsr unsnap_vp
+@nd:    ldy #0
         jsr lp_next
         lda LIVEP
+        beq @np
         sta (VP),y
-        jsr lp_clear
+@np:    jsr lp_clear
         inc LPOSLO
         bne @c
         inc LPOSHI
@@ -2242,7 +2308,14 @@ lp_rec: jsr lp_ptr
 @x:     rts
 
 lp_play:
-        jsr lp_ptr
+        lda LSTATE
+        cmp #LS_DUB
+        bne @np
+        jsr grid_step           ; overdub: click and snap too
+        jmp @go
+@np:    lda #0
+        sta SNAPD
+@go:    jsr lp_ptr
         ldy #0
         lda MUTEMEL             ; drums-only: skip both melody tracks
         bne @d
@@ -2285,8 +2358,14 @@ lp_play:
 @dub:   ldx LSTATE
         cpx #LS_DUB
         bne @p
+        sta VT4
+        jsr snap_vp
+        lda VT4
+        ldy #0
         jsr undo_push
-        sta (VP),y              ; overdub: stamp the live hit into the lane
+        sta (VP),y
+        jsr unsnap_vp
+        ldy #0              ; overdub: stamp the live hit into the lane
 @p:     jsr lp_next
         lda (VP),y              ; track 1 preset -> voice 2's sound
         beq @t2
@@ -2324,8 +2403,14 @@ lp_play:
 @m2dub: ldx LSTATE              ; overdub: stamp the live note event
         cpx #LS_DUB
         bne @q2
+        sta VT4
+        jsr snap_vp
+        lda VT4
+        ldy #0
         jsr undo_push
         sta (VP),y
+        jsr unsnap_vp
+        ldy #0
 @q2:    jsr lp_next             ; track 2 preset -> the lead
         ldy #0
         lda LIVEP
@@ -2404,6 +2489,7 @@ lp_wrap:                        ; end of a pass: song mode may switch sections
         jmp lp_hush
 
 lp_rewind:
+        jsr grid_reset
         lda #0
         sta LPOSLO
         sta LPOSHI
@@ -2412,6 +2498,123 @@ lp_rewind:
         sta LCELL
         inc LOOPCNT
         rts
+
+.segment "EXTRA"
+
+; One grid tick per recorded frame: how far the nearest 16th is (SNAPD),
+; the metronome click (drum_start, so it is never recorded) and the bar
+; count that rounds the loop's length.
+grid_step:
+        lda GRIDON
+        bne @on
+        sta SNAPD               ; grid off: no snapping
+        rts
+@on:    lda RSTEP
+        lsr a
+        cmp STEPPOS             ; nearer the last step or the next one?
+        bcc @fwd
+        lda STEPPOS
+        eor #$FF
+        clc
+        adc #1
+        jmp @sd
+@fwd:   lda RSTEP
+        sec
+        sbc STEPPOS
+@sd:    sta SNAPD
+        inc STEPPOS
+        lda STEPPOS
+        cmp RSTEP
+        bcc @x
+        lda #0                  ; a new grid step
+        sta STEPPOS
+        inc GRIDST
+        lda GRIDST
+        cmp #16
+        bcc @beat
+        lda #0
+        sta GRIDST
+        inc BARN
+@beat:  lda GRIDST
+        and #3                  ; click on each beat (every 4 steps)
+        bne @x
+        lda GRIDST
+        bne @cl
+        lda #5                  ; bar line: the accent
+        bne @go
+@cl:    lda #2                  ; other beats: a lighter click
+@go:    ldx #0
+        jmp drum_start
+@x:     rts
+
+snap_vp:                        ; VP -> the nearest grid step
+        lda SNAPD
+        jmp vp_add
+unsnap_vp:
+        lda SNAPD
+        eor #$FF
+        clc
+        adc #1
+vp_add:                         ; A = signed offset added to VP (keeps Y)
+        tax
+        clc
+        adc VP
+        sta VP
+        txa
+        bmi @n
+        bcc @x
+        inc VP+1
+@x:     rts
+@n:     bcs @x
+        dec VP+1
+        rts
+
+grid_reset:
+        lda #0
+        sta STEPPOS
+        sta GRIDST
+        sta BARN
+        sta SNAPD
+        rts
+
+; LLEN rounded to whole bars, so loops and overdubs stay aligned
+lp_bars:
+        lda GRIDON
+        beq @x
+        lda GRIDST              ; round to the nearest bar
+        cmp #8
+        bcc @b
+        inc BARN
+@b:     lda BARN
+        bne @m
+        lda #1                  ; never shorter than one bar
+        sta BARN
+@m:     lda #0                  ; LLEN = BARN * 16 * RSTEP
+        sta LLENLO
+        sta LLENHI
+        ldx BARN
+@ml:    ldy #16
+@ms:    clc
+        lda LLENLO
+        adc RSTEP
+        sta LLENLO
+        bcc @mn
+        inc LLENHI
+@mn:    dey
+        bne @ms
+        dex
+        bne @ml
+@x:     rts
+
+toggle_grid:                    ; SHIFT + SPACE
+        lda GRIDON
+        eor #1
+        sta GRIDON
+        lda #$FE
+        sta LASTS               ; redraw the step readout
+        rts
+
+.segment "CODE"
 
 undo_push:                      ; log what an overdub is about to overwrite
         pha
@@ -2477,6 +2680,7 @@ lp_close:                       ; end the first recording: LLEN = LPOS
         sta LLENLO
         lda LPOSHI
         sta LLENHI
+        jsr lp_bars             ; round up to whole bars
         lda GATE                ; key still held: end the note at the seam
         beq @go
         lda LPOSLO
@@ -2562,10 +2766,17 @@ loop_cmd:                       ; A = command
         ldx PRESET              ; the loop starts in the current sound
         inx
         stx LIVEP
+        jsr grid_reset
         lda #LS_REC
-        sta LSTATE
+        ldx GRIDON
+        beq @nc
+        lda #LS_CNT             ; a bar of count-in first
+@nc:    sta LSTATE
         rts
-@s1:    cpx #LS_REC
+@s1:    cpx #LS_CNT
+        bne @s1b
+        jmp lp_empty            ; SPACE during count-in cancels
+@s1b:   cpx #LS_REC
         bne @s2
         jmp lp_close
 @s2:    cpx #LS_PLAY
@@ -2581,7 +2792,10 @@ loop_cmd:                       ; A = command
 @tab:   cmp #2
         bne @clr
         ldx LSTATE              ; TAB: play / stop
-        cpx #LS_REC
+        cpx #LS_CNT
+        bne @t0
+        jmp lp_empty
+@t0:    cpx #LS_REC
         bne @t1
         jsr lp_close
         lda LSTATE
@@ -3587,7 +3801,7 @@ cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
             .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1),>(toggle_mute-1),>(toggle_chords-1)
             .byte >(undo_last-1),>(show_help-1)
-lsnames:    .byte "EMPTYREC  PLAY DUB  STOP DRUMS"
+lsnames:    .byte "EMPTYREC  PLAY DUB  STOP DRUMSCOUNT"
 titlewords: .byte "8-BIT KEYBOARDSTEREO 2-POKEY"
 qdemotxt:   .byte "< DEMOS  >"
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30,$32   ; 1..9, 0
@@ -3658,7 +3872,8 @@ help_text:
         .byte 19,2,0, "I                    UNDO LAST OVERDUB",0
         .byte 20,2,0, "Q                    LOOP DRUMS ONLY",0
         .byte 21,2,0, "< >                  DEMO PREV / NEXT",0
-        .byte 22,2,0, "SHIFT < >            DEMO SLOW / FAST",0
+        .byte 22,2,0, "SHIFT < >            TEMPO SLOW / FAST",0
+        .byte 21,26,0,"SHIFT SPACE = GRID",0
         .byte 23,2,$80," ANY KEY RETURNS                        ",0
         .byte $FF
 

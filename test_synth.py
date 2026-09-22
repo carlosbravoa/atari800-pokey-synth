@@ -96,6 +96,8 @@ for n in ("HELD", "LITKEY", "DRUMLIT", "LASTDRUM", "DISPNOTE", "PREVCON"):
     mem[L(n)] = 0xFF
 mem[L("PREVSTK")] = 0x0F
 mem[L("PRESREQ")] = 0xFF
+mem[L("RSTEP")] = 8                    # start sets these; this init doesn't run it
+mem[L("GRIDON")] = 1
 mem[0xD20F] = 0x04          # SKSTAT: no key
 call("cls")
 call("print_list", a=L("static_text") & 255, x=L("static_text") >> 8)
@@ -242,6 +244,7 @@ for _ in range(12):
     frame()
 check(mem[L("GATE")] == 0, "REMHOLD expiry releases it")
 
+mem[L("GRIDON")] = 0                   # tests 9-15 record free-time loops
 # 9. looper: record a note + a kick, close, replay, overdub a snare
 SP, TAB, BK, V = 0x21, 0x2C, 0x34, 0x10
 call("select_preset", a=0)
@@ -672,6 +675,60 @@ line0 = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000:0x4000 + 40])
 check(mem[L("HELPON")] == 0 and w(L("SDLSTL")) == L("dlist")
       and "POKEY SYNTH" in line0, f"any key returns to the synth ('{line0.strip()[:20]}')")
 tap(BK)
+
+# 16. recording grid: count-in, metronome, snap-to-16ths, whole-bar loops
+tap(BK)
+call("select_preset", a=0)
+mem[L("GRIDON")] = 1
+RS = mem[L("RSTEP")]
+check(RS == 8 and mem[L("GRIDON")] == 1, f"grid on, {RS} frames per 16th")
+d0 = mem[L("DRUMCNT")]
+tap(SP)
+check(mem[L("LSTATE")] == 5, "SPACE -> count-in (COUNT)")
+row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 6:0x4000 + 10 * 40 + 11])
+check(row == "COUNT", f"loop row shows '{row}'")
+n = 0
+while mem[L("LSTATE")] == 5 and n < 16 * RS + 8:
+    frame(); main_frame(); n += 1
+check(mem[L("LSTATE")] == 1 and 16 * RS - 2 <= n <= 16 * RS and w(L("LPOSLO")) == 0,
+      f"one bar of count-in ({n} frames, one already spent on the SPACE frame), REC from 0")
+check((mem[L("DRUMCNT")] - d0) & 255 == 4, "4 metronome clicks during the count-in")
+# play three notes off the grid; they must land on 16th boundaries
+for off in (3, 5, 2):
+    for _ in range(off): frame()
+    frame(A); frame()
+    for _ in range(RS): frame()
+for _ in range(16 * RS): frame()          # into the second bar
+tap(SP)                                   # close
+LL = w(L("LLENLO"))
+ml = [mem[L("MLANE") + i] for i in range(LL)]
+ons = [i for i, v in enumerate(ml) if 0 < v < 0xFE]
+check(all(i % RS == 0 for i in ons) and len(ons) == 3, f"note-ons snapped to the grid: {ons}")
+check(LL % (16 * RS) == 0 and LL >= 16 * RS,
+      f"loop closed to whole bars: {LL} frames = {LL // (16 * RS)} bar(s) of 16 x {RS}")
+dl = [v for v in (mem[L("DLANE") + i] for i in range(LL)) if v]
+check(not dl, f"the metronome is not recorded (drum lane {dl})")
+# grid off: no count-in, no snapping
+tap(BK)
+tap(SP | 0x40)                            # SHIFT + SPACE
+check(mem[L("GRIDON")] == 0, "SHIFT SPACE turns the grid off")
+tap(SP)
+check(mem[L("LSTATE")] == 1, "with the grid off SPACE records at once (no count-in)")
+for _ in range(3): frame()
+frame(A); frame()
+for _ in range(60): frame()
+tap(SP)
+ml = [mem[L("MLANE") + i] for i in range(w(L("LLENLO")))]
+ons = [i for i, v in enumerate(ml) if 0 < v < 0xFE]
+check(ons and ons[0] % RS != 0, f"unsnapped note kept its frame {ons}")
+tap(SP | 0x40)
+check(mem[L("GRIDON")] == 1, "SHIFT SPACE turns it back on")
+# tempo keys set the recording grid when no demo is loaded
+tap(BK)
+tap(0x36 | 0x40)
+check(mem[L("RSTEP")] == RS + 1, f"SHIFT < : slower recording grid ({mem[L('RSTEP')]})")
+tap(0x37 | 0x40)
+check(mem[L("RSTEP")] == RS, "SHIFT > : back")
 
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):
