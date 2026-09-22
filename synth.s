@@ -255,6 +255,17 @@ SAUDC3   = SH+5
 SAUDF4   = SH+6
 SAUDC4   = SH+7
 POLY4B   = $0B98        ; 1 = a loop chord tone owns POKEY2 ch4 this frame
+UNDOBUF  = $0C00        ; overdub undo log: (addr lo, hi, byte that was there)
+UNDOEND  = $0F00
+UNDOP    = $0B99        ; 2 bytes: next free log slot
+SHIFTF   = $0B9B        ; SHIFT held at the last key press
+CURS     = $0B9C        ; frames per step of the loaded demo (0 = not a demo)
+LASTS    = $0B9D        ; main: as drawn
+TEMPO    = $0B9E        ; demo tempo offset, signed -4..+4 (SHIFT + < >)
+HELPON   = $0B9F        ; 1 = the help screen is up
+UPTR     = $F2          ; VBI-owned ZP (with VP $F0-$F1)
+K_I      = $0D          ; undo
+K_HELP   = $11
 NOTE2CNT = $066D        ; +1 per slot-0 (track 1) note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
@@ -316,6 +327,11 @@ RTISTUB  = $0690
         .word __HIMEM_START__
         .word __HIMEM_LAST__-1
 
+.segment "XEXHDR3"
+.import __LOMEM_START__, __LOMEM_LAST__
+        .word __LOMEM_START__
+        .word __LOMEM_LAST__-1
+
 .segment "XEXTRL"
         .word $02E0, $02E1
         .word start
@@ -332,6 +348,12 @@ dlist:
         .byte $84                                   ;   row 7 + DLI
         .res  16,$02                                ; rows 8-23 GR.0
         .byte $41,<dlist,>dlist
+
+dlist_help:                     ; the help screen: 24 GR.0 rows
+        .byte $70,$70,$70
+        .byte $42,<SCREEN,>SCREEN
+        .res  23,$02
+        .byte $41,<dlist_help,>dlist_help
 
 ; ===========================================================================
 .segment "CODE"
@@ -521,9 +543,15 @@ main_tick:
         cmp LASTSEQ
         beq @nk
         sta LASTSEQ
-        lda KEYEV
+        lda HELPON              ; any key leaves the help screen
+        beq @hk
+        jmp hide_help
+@hk:    lda KEYEV
         jsr handle_key
-@nk:    lda PRESREQ             ; loop playback switched the sound
+@nk:    lda HELPON
+        beq @pr
+        rts
+@pr:    lda PRESREQ             ; loop playback switched the sound
         cmp #$FF
         beq @ui
         tay
@@ -627,7 +655,15 @@ handle_key:
         rts
 @pr:    txa
         jmp select_preset
-@go:    lda cmdhi,x
+@go:    lda SHIFTF              ; SHIFT + < > = demo tempo
+        beq @d
+        cpx #11                 ; cmdkeys: 11 = '<', 12 = '>'
+        beq @slow
+        cpx #12
+        bne @d
+        jmp tempo_up
+@slow:  jmp tempo_down
+@d:     lda cmdhi,x
         pha
         lda cmdlo,x
         pha
@@ -725,6 +761,46 @@ loop_tab:
         lda #2
         sta LCMD
         rts
+.segment "EXTRA"
+undo_last:                      ; I: put back what the last overdub wrote
+        lda LSTATE
+        cmp #LS_DUB
+        bne @go
+        lda #1                  ; leave DUB first (the VBI writes the log)
+        sta LCMD
+        jsr wait_lcmd
+@go:    lda UNDOP
+        sta ZPTR
+        lda UNDOP+1
+        sta ZPTR+1
+@lp:    lda ZPTR+1
+        cmp #>UNDOBUF
+        bne @ok
+        lda ZPTR
+        cmp #<UNDOBUF
+        beq @done
+@ok:    sec                     ; step back one entry
+        lda ZPTR
+        sbc #3
+        sta ZPTR
+        lda ZPTR+1
+        sbc #0
+        sta ZPTR+1
+        ldy #0
+        lda (ZPTR),y
+        sta ZSCR
+        iny
+        lda (ZPTR),y
+        sta ZSCR+1
+        iny
+        lda (ZPTR),y
+        ldy #0
+        sta (ZSCR),y
+        jmp @lp
+@done:  jmp undo_reset
+
+.segment "CODE"
+
 toggle_chords:                  ; R: AUTO held chords on/off (this preset)
         lda P_CHORD
         cmp #CH_AUTO
@@ -761,6 +837,24 @@ loop_clear:
         rts
 
 ; ---- built-in demos: < > step through them; each loads and plays ---------
+tempo_down:                     ; slower = more frames per step
+        ldx #1
+        bne tempo
+tempo_up:
+        ldx #$FF
+tempo:  txa
+        clc
+        adc TEMPO
+        cmp #$FC                ; -4
+        beq @x
+        cmp #5
+        beq @x
+        sta TEMPO
+        ldx DEMOIDX             ; reload the demo at the new tempo
+        beq @x
+        jmp load_demo
+@x:     rts
+
 prev_demo:
         ldx DEMOIDX
         dex
@@ -792,7 +886,16 @@ load_demo:                      ; X = demo 1..NDEMO
         bcc @h
         inc ZPTR+1
 @h:     jsr getb
-        sta ZSTEP
+        clc                     ; tempo offset (SHIFT + < >), clamped
+        adc TEMPO
+        cmp #4
+        bcs @t1
+        lda #4
+@t1:    cmp #15
+        bcc @t2
+        lda #14
+@t2:    sta ZSTEP
+        sta CURS
         jsr getb
         sta ZNST
         jsr getb                ; P1 -> track 1 preset at frame 0
@@ -1146,7 +1249,41 @@ ui_update:
         inx
         cpx #16
         bne @lb
-@mv:    lda STEREO
+@mv:    lda DEMOIDX             ; demo step length (tempo), row 9
+        bne @s1
+        lda #0
+        beq @s2
+@s1:    lda CURS
+@s2:    cmp LASTS
+        beq @st
+        sta LASTS
+        beq @sbl
+        ldy #0
+        lda #'S'-32
+        sta SCREEN+9*40+35
+        lda #'='-32
+        sta SCREEN+9*40+36
+        lda CURS
+        ldx #0
+@sd:    cmp #10
+        bcc @sw
+        sbc #10
+        inx
+        bne @sd
+@sw:    pha
+        txa
+        ora #$10
+        sta SCREEN+9*40+37
+        pla
+        ora #$10
+        sta SCREEN+9*40+38
+        jmp @st
+@sbl:   lda #0
+        ldx #3
+@sc:    sta SCREEN+9*40+35,x
+        dex
+        bpl @sc
+@st:    lda STEREO
         cmp LASTSTE
         beq @md
         sta LASTSTE
@@ -1669,6 +1806,44 @@ put_2dig:                       ; A = 0-15 -> two digits at (ZSCR),y
         iny
         rts
 
+.segment "EXTRA"
+show_help:                      ; HELP (or SHIFT-/): the full key list
+        lda #1
+        sta HELPON
+        lda #<dlist_help        ; plain GR.0 for the whole screen
+        sta SDLSTL
+        lda #>dlist_help
+        sta SDLSTL+1
+        jsr cls
+        lda #<help_text
+        ldx #>help_text
+        jmp print_list
+
+hide_help:
+        lda #0
+        sta HELPON
+        lda #<dlist
+        sta SDLSTL
+        lda #>dlist
+        sta SDLSTL+1
+        jsr cls                 ; rebuild the synth screen
+        lda #<static_text
+        ldx #>static_text
+        jsr print_list
+        lda PRESET
+        jsr select_preset
+        jsr draw_drums
+        lda #$FE                ; force the live rows to redraw
+        sta LASTLIT
+        sta LASTLS
+        sta LASTDEMO
+        sta LASTDRUM
+        sta DISPNOTE
+        sta LASTS
+        rts
+
+.segment "CODE"
+
 ; ---------------------------------------------------------------------------
 ; text helpers
 cls:
@@ -1787,6 +1962,9 @@ kb_poll:
         sta STEREO
         sta D_TMR+8
 @kc:    lda KBCODE
+        and #$40
+        sta SHIFTF              ; SHIFT + < > = demo tempo
+        lda KBCODE
         and #$3F
 @down:  cmp HELD
         beq @same
@@ -2107,6 +2285,7 @@ lp_play:
 @dub:   ldx LSTATE
         cpx #LS_DUB
         bne @p
+        jsr undo_push
         sta (VP),y              ; overdub: stamp the live hit into the lane
 @p:     jsr lp_next
         lda (VP),y              ; track 1 preset -> voice 2's sound
@@ -2145,6 +2324,7 @@ lp_play:
 @m2dub: ldx LSTATE              ; overdub: stamp the live note event
         cpx #LS_DUB
         bne @q2
+        jsr undo_push
         sta (VP),y
 @q2:    jsr lp_next             ; track 2 preset -> the lead
         ldy #0
@@ -2166,6 +2346,7 @@ lp_play:
 @q2dub: ldx LSTATE
         cpx #LS_DUB
         bne @adv
+        jsr undo_push
         sta (VP),y
 @adv:   jsr lp_clear
         clc                     ; progress: +16/frame vs LLEN (Bresenham)
@@ -2230,6 +2411,43 @@ lp_rewind:
         sta LACCHI
         sta LCELL
         inc LOOPCNT
+        rts
+
+undo_push:                      ; log what an overdub is about to overwrite
+        pha
+        lda UNDOP+1
+        cmp #>UNDOEND
+        bcs @full
+        lda UNDOP
+        sta UPTR
+        lda UNDOP+1
+        sta UPTR+1
+        ldy #0
+        lda (VP),y              ; the byte that was there
+        sta VT5
+        lda VP
+        sta (UPTR),y
+        iny
+        lda VP+1
+        sta (UPTR),y
+        iny
+        lda VT5
+        sta (UPTR),y
+        clc
+        lda UNDOP
+        adc #3
+        sta UNDOP
+        bcc @full
+        inc UNDOP+1
+@full:  ldy #0
+        pla
+        rts
+
+undo_reset:
+        lda #<UNDOBUF
+        sta UNDOP
+        lda #>UNDOBUF
+        sta UNDOP+1
         rts
 
 lp_ptr: clc                     ; VP = MLANE + bank + LPOS
@@ -2318,7 +2536,8 @@ lp_mute:                        ; toggle drums-only; silence the loop's voices
         sta ESTATE
 @x:     rts
 
-lp_dub: ldx PRESET              ; track 2 starts in the current sound
+lp_dub: jsr undo_reset          ; this pass is what "undo" undoes
+        ldx PRESET              ; track 2 starts in the current sound
         inx
         stx LIVEP
         lda #LS_DUB
@@ -3285,6 +3504,8 @@ dli:
         pha
         tya
         pha
+        lda HELPON
+        bne @gr
         lda VCOUNT
         cmp #40
         bcs @gr
@@ -3356,14 +3577,16 @@ drseq:      .byte 0
             .byte $00,$00
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
-            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT,K_Q,K_R
-NCMD = 15
+            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT,K_Q,K_R,K_I,K_HELP
+NCMD = 17
 cmdlo:      .byte <(oct_down-1),<(oct_up-1),<(ed_up-1),<(ed_down-1)
             .byte <(ed_left-1),<(ed_right-1),<(reset_preset-1),<(hush-1)
             .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(prev_demo-1),<(next_demo-1),<(toggle_mute-1),<(toggle_chords-1)
+            .byte <(undo_last-1),<(show_help-1)
 cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
             .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1),>(toggle_mute-1),>(toggle_chords-1)
+            .byte >(undo_last-1),>(show_help-1)
 lsnames:    .byte "EMPTYREC  PLAY DUB  STOP DRUMS"
 titlewords: .byte "8-BIT KEYBOARDSTEREO 2-POKEY"
 qdemotxt:   .byte "< DEMOS  >"
@@ -3414,6 +3637,32 @@ chordnm:    .byte "OFF   MAJOR MINOR 7TH   OCTAVEPOWER DIM   AUTO  "
 polytxt:    .byte "POLY"
 swtxt:      .byte "DOWN UP   OFF  "
 
+.segment "EXTRA"
+help_text:
+        .byte 0,0,$80,  "  POKEY SYNTH - ALL KEYS                ",0
+        .byte 2,2,0,  "A S D F G H J K L ;  WHITE NOTES",0
+        .byte 3,2,0,  "W E  T Y U  O P      BLACK NOTES",0
+        .byte 4,2,0,  "Z X                  OCTAVE DOWN / UP",0
+        .byte 5,2,0,  "1-9 0                INSTRUMENT PRESETS",0
+        .byte 6,2,0,  "C V B N M , . /      DRUM PADS",0
+        .byte 8,2,$80,"PLAYING",0
+        .byte 9,2,0,  "R                    AUTO CHORDS ON/OFF",0
+        .byte 10,2,0, "ARROWS OR STICK      EDIT THE SOUND",0
+        .byte 11,2,0, "RETURN               RESTORE THE PRESET",0
+        .byte 12,2,0, "OPTION SELECT        PRESET NEXT / PREV",0
+        .byte 13,2,0, "ESC                  SILENCE",0
+        .byte 15,2,$80,"LOOPER",0
+        .byte 16,2,0, "SPACE                REC / CLOSE / DUB",0
+        .byte 17,2,0, "TAB                  STOP / PLAY",0
+        .byte 18,2,0, "BACKSPACE            CLEAR THE LOOP",0
+        .byte 19,2,0, "I                    UNDO LAST OVERDUB",0
+        .byte 20,2,0, "Q                    LOOP DRUMS ONLY",0
+        .byte 21,2,0, "< >                  DEMO PREV / NEXT",0
+        .byte 22,2,0, "SHIFT < >            DEMO SLOW / FAST",0
+        .byte 23,2,$80," ANY KEY RETURNS                        ",0
+        .byte $FF
+
+.segment "RODATA"
 static_text:
         .byte 0,0,$80, " POKEY SYNTH  -  8-BIT KEYBOARD    OCT  ",0
         .byte 9,1,0, "NOTE",0
@@ -3423,7 +3672,7 @@ static_text:
         .byte 16,1,$80, "SOUND EDITOR",0
         .byte 16,14,0, "ARROWS/STICK  RET=RESET",0
         .byte 10,1,0, "LOOP",0
-        .byte 23,0,0, "Z/X OCT  SPACE REC  TAB PLAY  BKSP CLEAR",0
+        .byte 23,0,0, "Z/X OCT  SPACE REC  TAB PLAY   HELP KEYS",0
         .byte $FF
 
 ; screen row address tables

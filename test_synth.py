@@ -614,6 +614,65 @@ check(mem[L("LSTATE")] == 4 and w(L("LPOSLO")) == 0, "NEXTREQ 2 stops the song a
 tap(BK)
 check(mem[L("LBANK")] == 0 and mem[L("NEXTREQ")] == 0, "clear resets to bank 0")
 
+# 15. undo last overdub, demo tempo (SHIFT < >), help screen
+I_KEY, HELPK = 0x0D, 0x11
+tap(BK)
+tap(Q)                                   # a demo with drums
+LL = w(L("LLENLO"))
+before = [mem[L("DLANE") + i] for i in range(LL)]
+tap(SP)                                  # -> DUB
+check(mem[L("LSTATE")] == 3, "overdub started")
+for _ in range(2 * LL):
+    if w(L("LPOSLO")) <= 3: break
+    frame(); main_frame()
+for _ in range(4): frame()
+f_new = w(L("LPOSLO"))
+frame(V); frame()                        # a snare on an empty frame
+for _ in range(2 * LL):
+    if w(L("LPOSLO")) == 0: break
+    frame(); main_frame()
+hit_at = [i for i in range(LL) if mem[L("DLANE") + i] == 2 and before[i] != 2]
+check(len(hit_at) == 1, f"the overdubbed snare is in the lane at {hit_at}")
+# and one on top of an existing hit
+f_over = next(i for i in range(8, LL) if before[i] == 1)
+for _ in range(2 * LL):
+    if w(L("LPOSLO")) == f_over: break
+    frame(); main_frame()
+else:
+    raise SystemExit(f"never reached frame {f_over}")
+frame(V); frame()
+check(mem[L("DLANE") + f_over] == 2, f"an overdub overwrote the kick at frame {f_over}")
+tap(SP)                                  # back to PLAY
+tap(I_KEY)
+after = [mem[L("DLANE") + i] for i in range(LL)]
+check(after == before, "I undoes the whole overdub pass, restoring overwritten hits")
+tap(I_KEY)
+check([mem[L("DLANE") + i] for i in range(LL)] == before, "a second undo is harmless")
+# tempo
+tap(BK)
+tap(Q)                                   # demo 1 again
+base_len, base_s = w(L("LLENLO")), mem[L("CURS")]
+tap(0x37 | 0x40)                         # SHIFT + '>' : faster
+check(mem[L("TEMPO")] == 0xFF and mem[L("CURS")] == base_s - 1
+      and w(L("LLENLO")) == base_len - (base_len // base_s), f"SHIFT > : step {mem[L('CURS')]}")
+row9 = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 9 * 40 + 35:0x4000 + 9 * 40 + 39])
+check(row9 == f"S={base_s - 1:02d}", f"row 9 shows '{row9}'")
+for _ in range(4): tap(0x36 | 0x40)      # SHIFT + '<' x4 : slower, clamped at +4
+check(mem[L("TEMPO")] == 3 and mem[L("CURS")] == base_s + 3, f"SHIFT < clamps at +4 ({mem[L('TEMPO')]})")
+for _ in range(3): tap(0x37 | 0x40)
+check(mem[L("TEMPO")] == 0 and mem[L("CURS")] == base_s, "back to the demo's own tempo")
+# help screen
+tap(HELPK)
+dl = w(L("SDLSTL"))
+line = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 2 * 40:0x4000 + 2 * 40 + 40]).strip()
+check(mem[L("HELPON")] == 1 and dl == L("dlist_help") and line.startswith("A S D F G H J K L ;"),
+      f"HELP shows the key list ('{line[:28]}')")
+tap(A)
+line0 = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000:0x4000 + 40])
+check(mem[L("HELPON")] == 0 and w(L("SDLSTL")) == L("dlist")
+      and "POKEY SYNTH" in line0, f"any key returns to the synth ('{line0.strip()[:20]}')")
+tap(BK)
+
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):
     call("select_preset", a=p)

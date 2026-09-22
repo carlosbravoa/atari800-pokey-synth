@@ -43,6 +43,9 @@ The first key() of a link session is often lost; send a throwaway first.
 | `BACKSPACE` | looper: clear |
 | `R` | held chords on/off for this preset: CHORD = AUTO, CHD SPD = POLY (RETURN restores) |
 | `Q` | drums only: mute the loop's melody tracks (any loop or demo) and keep your own sound |
+| `I` | undo the last overdub pass (restores what it wrote, including overwritten hits) |
+| `HELP` (PC F5 / Insert) | full-screen key list; any key returns |
+| SHIFT `<` `>` | demo tempo: slower / faster (reloads the demo; `S=nn` on row 9) |
 | `<` `>` (PC `-` `=`) | built-in demo loops: previous / next (loads + plays; jam or overdub on it) |
 
 Edits are kept per preset (the `live` table) until RETURN.
@@ -196,6 +199,27 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
     MAJOR.
 - `R` toggles AUTO+POLY on the current preset (kept in `live`, RETURN
   restores).
+
+## Undo, tempo, help
+
+- **Undo** (`I`): while overdubbing, `undo_push` logs (address, previous
+  byte) for every lane byte a stamp is about to overwrite, into
+  `$0C00-$0EFF` (768 entries), pointer UNDOP `$0B99`. `lp_dub` resets it,
+  so `I` undoes the last DUB session, restoring hits the overdub wrote
+  over. If pressed during DUB it leaves DUB first (the VBI owns the log).
+  The log is outside every load segment, so deploys don't disturb it.
+- **Tempo** (SHIFT `<` `>`): TEMPO `$0B9E` (-4..+4) is added to a demo's
+  S when `load_demo` expands it, clamped to 4..14 frames/step, and the
+  demo reloads. Recorded loops keep their own timing (changing it would
+  mean resampling the lanes). CURS `$0B9C` shows as `S=nn` at row 9 col 35.
+  SHIFT comes from KBCODE bit 6 (SHIFTF `$0B9B`), sampled in kb_poll.
+- **Help** (`HELP`, i.e. F5/Insert on the board): HELPON `$0B9F` switches
+  SDLSTL to `dlist_help` (24 plain GR.0 rows) and prints `help_text`; the
+  DLI skips its per-row colors while it's up; `main_tick` routes the next
+  key to `hide_help`, which rebuilds the normal screen. Help text and the
+  help/undo routines live in the EXTRA segment.
+- **Third load segment**: EXTRA at `$0F00-$1FFF` (~3.4 KB free) holds
+  main-thread code and text. MAIN has ~170 bytes free, HIDATA ~170.
 
 ## Looper
 
