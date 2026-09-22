@@ -54,3 +54,24 @@ fails. Coverage is what `midi2psq.py` reported at conversion time.
 **Conclusion:** the part picker was not the problem. One playback bug
 made every 3-part conversion sound like lead + drums. Re-rate before
 tuning heuristics on ears.
+
+## What the session actually taught (2026-09-22)
+
+1. **A playback bug, not the picker.** The stereo mirror overwrote POKEY2
+   during streamed and built-in-song playback, so every 3-part piece came
+   out as lead + drums. StarmanE and dbztheme went 1-2 -> 5 with no change
+   to the conversion. Rate only after the audio path is known good.
+2. **A repeated-note part can be the tune** (smkrainbow's lead moves 0.6
+   semitones on average). It just has to be played on a percussive preset,
+   or each repeat merges into the last and the melody sounds like one
+   stuck note. `auto_preset` now picks PIANO for such parts.
+3. **Never merge a repeated-note line into a sustaining voice**: that was
+   the "stuck note" in the harmony (a 37-times-repeated note 47 on
+   STRINGS).
+4. **Merging is about filling silence, not registers.** Arrangements hand
+   the tune over: smkrainbow's chorus lives on another channel while the
+   main lead rests. `relay` now accepts a candidate when it sounds while
+   the chosen part is silent (`fills`), and `part()` masks it note by note
+   elsewhere. Manually: `--lead 5:4,3:2` (first has priority).
+5. **Note count beats register** when choosing between melodic lines:
+   picking the sparser one cost a 5 -> 3 on dbz2bsgt.

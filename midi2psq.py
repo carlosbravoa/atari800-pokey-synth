@@ -180,6 +180,7 @@ class Stat:
         seq = [n for n, _, _ in top]
         steps = [abs(b - a) for a, b in zip(seq, seq[1:])] or [12]
         self.step = sum(steps) / len(steps)
+        self.iv = [(a, b) for _, a, b in ns]           # when it sounds
 
 
 def channel_stats(mid, start=0.0, end=0.0):
@@ -233,32 +234,41 @@ def auto_pick(mid, start=0.0, end=0.0):
 
     def step_fit(x):
         if x.step < 1.0:
-            return -1.2                          # repeated notes: an ostinato
-        if x.step <= 6.0:
-            return 1.5                           # stepwise: a tune
+            return -0.3      # repeated notes: playable as a lead, but only
+        if x.step <= 6.0:    #  on a percussive preset (see pick_preset)
+            return 1.5       # stepwise: a tune
         return 0.3 if x.step <= 9.0 else 0.0     # leaps: arpeggio or bass
 
     def lead_score(x):
         # note count, not "how much of the time it sounds": in the rated
         # set the busiest-sounding channel was wrong in both directions
-        return (2.0 * (1.0 - x.poly) + 1.2 * min(x.n, 150) / 150
+        # note count carries real weight: picking the sparser of two
+        # melodic lines cost a 5 -> 3 on dbz2bsgt
+        return (2.0 * (1.0 - x.poly) + 2.5 * min(x.n, 120) / 120
                 + 0.8 * min(x.dens, 6) / 6 + step_fit(x)
-                + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 25)
+                + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 40)
 
     def bass_score(x):
         fam = {"bass": 1.2, "melodic": 0.2, "other": 0.2, "?": 0.2,
                "pad": -0.3, "lead": -0.5}[x.family]
-        return (fam + 1.5 * x.active + 1.5 * (1.0 - x.poly)
-                - max(0, x.mean - 50) / 6)
+        return (fam + 1.0 * x.active + 1.5 * (1.0 - x.poly)
+                + 1.2 * min(x.n, 120) / 120 - max(0, x.mean - 50) / 6)
 
     def harm_score(x):
         fam = {"pad": 1.0, "melodic": 0.6, "lead": 0.5, "other": 0.3,
                "?": 0.3, "bass": -1.0}[x.family]
-        return fam + 1.5 * x.active - abs(x.mean - 66) / 14
+        # a counter-line has to move: a repeated-note ostinato played on a
+        # sustaining preset just sounds like one stuck note
+        return (fam + 1.0 * x.active + 1.5 * min(x.n, 120) / 120
+                + step_fit(x) - abs(x.mean - 66) / 14)
 
-    lead = max(mel, key=lead_score)
+    # a tune does not live in the bass register: keep those out of the
+    # running while anything else is available (note count alone would
+    # otherwise hand the lead to a busy bass line)
+    high = [x for x in mel if x.mean >= 50] or mel
+    lead = max(high, key=lead_score)
     if lead.poly > 0.5:                  # a chord channel: its top line is a
-        alt = [x for x in mel            #  harmony, so prefer a real single
+        alt = [x for x in high           #  harmony, so prefer a real single
                if x is not lead and x.poly < 0.2 and step_fit(x) > 0
                and x.n >= 0.25 * lead.n and x.mean >= 52
                and x.family not in ("bass",)]
@@ -269,24 +279,54 @@ def auto_pick(mid, start=0.0, end=0.0):
     rest = [x for x in rest if x is not bass]
     harm = max(rest, key=harm_score) if rest else None
 
-    def relay(seed, pool):
-        """arrangements hand a part between instruments: fill the seed's
-        silent stretches with same-register parts"""
-        chosen = [seed]
+    def sounding(ivs):
+        """merge intervals -> total seconds and the merged list"""
+        out = []
+        for a2, b in sorted(ivs):
+            if out and a2 <= out[-1][1]:
+                out[-1][1] = max(out[-1][1], b)
+            else:
+                out.append([a2, b])
+        return sum(b - a2 for a2, b in out), out
+
+    def fills(cand, have):
+        """how many seconds the candidate sounds while `have` is silent"""
+        _, merged = sounding(have)
+        extra = 0.0
+        for a2, b in cand:
+            seg = [(a2, b)]
+            for x, y in merged:
+                seg = [p for s0, s1 in seg
+                       for p in ((s0, min(s1, x)), (max(s0, y), s1))
+                       if p[1] - p[0] > 0.01]
+            extra += sum(s1 - s0 for s0, s1 in seg)
+        return extra
+
+    def relay(seed, pool, melodic=True):
+        """Arrangements hand a part between instruments: a second channel
+        carries the tune where the first is silent (smkrainbow's chorus).
+        So the test is what a candidate ADDS while the chosen part rests -
+        not its register, and not whether their spans overlap. part() then
+        masks it note by note wherever the chosen part is sounding."""
+        chosen, have = [seed], list(seed.iv)
         for c in sorted(pool, key=lambda x: -x.n):
-            if abs(c.mean - seed.mean) > 8 or c.family != seed.family:
+            if melodic and step_fit(c) <= 0 and c.step >= 1.0:
                 continue
-            if any(min(c.last, x.last) - max(c.first, x.first) > 0.5 * (c.last - c.first)
-                   for x in chosen):
+            if c.family == "bass" and seed.family != "bass":
+                continue
+            if abs(c.mean - seed.mean) > 14:
+                continue
+            if fills(c.iv, have) < 0.08 * span:        # adds little: skip
                 continue
             chosen.append(c)
+            have += c.iv
         return chosen
 
     used = {x.spec for x in (lead, bass, harm) if x}
     free = lambda: [x for x in mel if x.spec not in used]
     leads = relay(lead, free()) if lead else []
     used |= {x.spec for x in leads}
-    basses = relay(bass, free()) if bass else []
+    basses = relay(bass, free(), melodic=False) if bass else []
     used |= {x.spec for x in basses}
     harms = relay(harm, free()) if harm else []
     print("auto-picked parts (override with --lead/--bass/--harm/--drums):")
@@ -352,14 +392,23 @@ def fit_range(events, name, transpose=0):
     return keep, shift
 
 
-def add_part(w, track, events, preset, start_frame=0):
+def add_part(w, track, events, preset, start_frame=0, gap=2):
+    """Notes onto one synth track. Each note is released `gap` frames before
+    the next one starts: without that, a repeated pitch on a sustaining
+    preset never re-articulates and a run of separate notes is heard as one
+    long note."""
     if not events:
         return 0
     w.preset(0, track, preset)
+    ev = sorted(events, key=lambda e: e[1])
     n = 0
-    for note, s0, s1 in events:
+    for i, (note, s0, s1) in enumerate(ev):
         f0 = max(0, round(s0 * FPS) - start_frame)
         f1 = max(f0 + 1, round(s1 * FPS) - start_frame)
+        if i + 1 < len(ev):
+            nxt = max(0, round(ev[i + 1][1] * FPS) - start_frame)
+            if f1 > nxt - gap:
+                f1 = max(f0 + 1, nxt - gap)
         w.note_on(f0, track, note - LOW)
         w.note_off(f1, track)
         n += 1
@@ -421,6 +470,23 @@ def main():
     for k in parts:
         parts[k], _ = fit_range(parts[k], k, a.transpose)
     coverage_check(parts, drums, (a.end or mid.length) - a.start)
+
+    # A part that repeats one pitch (or nearly) has to be played on a
+    # percussive sound: on a sustaining preset each repeat merges into the
+    # one before and a whole melody is heard as a single stuck note.
+    def auto_preset(events, default):
+        if not events:
+            return default
+        seq = [n for n, _, _ in sorted(events, key=lambda e: e[1])]
+        steps = [abs(b - a2) for a2, b in zip(seq, seq[1:])] or [12]
+        return "PIANO" if sum(steps) / len(steps) < 1.2 else default
+
+    if a.preset_lead == "ORGAN":
+        a.preset_lead = auto_preset(parts["lead"], "ORGAN")
+    if a.preset_harm == "STRINGS":
+        a.preset_harm = auto_preset(parts["harm"], "STRINGS")
+    print(f"  sounds: lead {a.preset_lead}, bass {a.preset_bass}, "
+          f"harmony {a.preset_harm}")
 
     stereo = bool(parts["harm"])
     title = a.title or os.path.basename(a.midi).rsplit(".", 1)[0]

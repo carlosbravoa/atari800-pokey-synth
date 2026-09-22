@@ -159,12 +159,19 @@ python3 midi2psq.py song.mid --lead 1,5 --bass 3,4 --harm 2,6 --drums 7,8,9,10 \
 python3 pcplay.py songs/kalinka.psq
 ```
 
+- **Sounds are chosen for the parts too**: a part whose mean step is under
+  ~1.2 semitones (a repeated-note tune) gets PIANO, because on a sustaining
+  preset each repeat merges into the last and the whole line is heard as
+  one stuck note.
 - **With no `--lead`/`--bass` it picks the parts itself** from the file's
   channel statistics: each role wants a register *and* a part that plays
   (`auto_pick`: lead near midi 72, bass low, harmony mid, all weighted by
   coverage and note count), then `relay` adds same-register parts that
   cover the stretches the first one is silent for (arrangements hand a
-  part between instruments: Kalinka's Square Bass -> Synth Bass).
+  part between instruments). A relay candidate qualifies by how much it
+  sounds *while the chosen part is silent* (`fills`), not by register:
+  smkrainbow's chorus is on a different channel from its main lead.
+  Manually, list both: `--lead 5:4,3:2` (the first masks the second).
 - **Every conversion prints a coverage map** (which tenth of the song each
   part plays) and warns when a part is mostly silent or starts late. That
   is what catches a wrong track choice *before* you listen — the first

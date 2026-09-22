@@ -29,7 +29,7 @@ LEAD = 120                      # frames of lead-in / how far ahead we fill
 CHUNK = 64                      # events per poke (64 x 4 = 256 bytes)
 
 
-def play(path, loop=False, lead=LEAD, quiet=False):
+def play(path, loop=False, lead=LEAD, quiet=False, watch=None):
     h, ev = psq.read(path)
     if not quiet:
         print(psq.describe(h, ev))
@@ -86,6 +86,16 @@ def play(path, loop=False, lead=LEAD, quiet=False):
                         tail = (tail + run) & (RING - 1)
                         i += run
                     l.poke(STAIL, bytes([tail]))
+                    if watch and time.time() - watch[0] > 1.0:
+                        watch[0] = time.time()
+                        st = lf.peek(l, 0x0600, 0x75)
+                        v = lf.peek(l, 0x0B40, 0x30)
+                        sh = lf.peek(l, 0x0B78, 32)
+                        print(f"    t{frame_now() - base:5d} lead n{st[0x0A]:3d} "
+                              f"est{st[0x0B]} vol{st[0x0D]:2d} AUDC{sh[3]:02X} | "
+                              f"v0 n{v[1]:3d} est{v[2]} vol{v[4]:2d} AUDC{sh[0x13]:02X} | "
+                              f"v1 n{v[21]:3d} est{v[22]} vol{v[24]:2d} AUDC{sh[0x15]:02X}",
+                              flush=True)
                     if not started:
                         l.poke(STREAMON, bytes([1]))
                         started = True
@@ -132,7 +142,8 @@ def main():
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "songs", a[0])
         if not path.endswith(".psq"):
             path += ".psq"
-    play(path, loop="--loop" in sys.argv, lead=lead)
+    play(path, loop="--loop" in sys.argv, lead=lead,
+         watch=[0.0] if "--watch" in sys.argv else None)
 
 
 if __name__ == "__main__":
