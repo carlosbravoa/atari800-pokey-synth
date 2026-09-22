@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Built-in ANTHEM song -> songdata.inc: the five sections in the demos'
-compact format plus the arrangement, so the .xex plays the whole song
-standalone (the Atari expands the next section into the idle lane bank and
-switches at the seam, exactly as songfile.py does from the PC).
+"""Built-in ANTHEM song -> songdata.inc, played by the Atari's own pattern
+player (song_step): the same arrangement the .psq streams, voices driven
+directly instead of through the looper, so it plays in stereo with all
+three parts and leaves a recorded loop untouched.
 
-Sections carry bass (track 1) + lead (track 2) + drums; the streamed .psq
-version's third voice (bar-long fifths) has no lane to live in.
+Section layout:  S N P1 P2 P3  T1... $FF  T2... $FF  T3... $FF  drums[N]
+  S      frames per 16th step        N   steps in the section
+  P1/2/3 preset+1 per track (0 = leave it alone)
+  Tn     (step, note, duration in steps) triples: 1 = bass, 2 = lead,
+         3 = the fifths (stereo only; mono has no channel for them)
+  drums  one byte per step, 0 or drum+1
+Arrangement: (section+1, repeats) pairs, 0 ends and loops from the top.
 """
 import contextlib
 import io
@@ -16,19 +21,23 @@ with contextlib.redirect_stdout(io.StringIO()):
 import gen_demos as gd
 
 S, N = ca.S, ca.N
+FIFTHS = [(bar * 16, ca.n(p), 16) for bar, p in enumerate(ca.FIFTHS)]
 SECTIONS = [
-    ("INTRO", ca.anthem_bass(range(3)) + ca.eighths(3, "G"), [],
+    ("INTRO", ca.anthem_bass(range(3)) + ca.eighths(3, "G"), [], [],
      ca.kit(ca.beat(kick=(0, 8), hat=(2, 6, 10, 14), bars=range(3)),
-            dict(kick=[48]), ca.ROLL), "BASS", None),
-    ("VERSE", ca.quarter_bass(), ca.VERSE,
-     ca.kit(ca.beat(kick=(0, 8), snare=(4, 12), hat=(2, 6, 10, 14))), "BASS", "FLUTE"),
-    ("CHORUS", ca.anthem_bass(), ca.HOOK, ca.CHORUS_KIT, "BASS", "ORGAN"),
+            dict(kick=[48]), ca.ROLL), "BASS", None, None),
+    ("VERSE", ca.quarter_bass(), ca.VERSE, [],
+     ca.kit(ca.beat(kick=(0, 8), snare=(4, 12), hat=(2, 6, 10, 14))),
+     "BASS", "FLUTE", None),
+    ("CHORUS", ca.anthem_bass(), ca.HOOK, FIFTHS, ca.CHORUS_KIT,
+     "BASS", "ORGAN", "STRINGS"),
     ("BREAK", [(bar * 16, ca.n(p), 16) for bar, p in
-               enumerate(("A3", "F3", "C4", "G3"))], ca.BREAK,
-     ca.kit(ca.beat(kick=(0,), hat=(8,), bars=range(3)), ca.ROLL), "STRINGS", "BELL"),
-    ("OUTRO", ca.anthem_bass(range(3)) + [(48, ca.n("A1"), 16)], ca.OUTRO,
+               enumerate(("A3", "F3", "C4", "G3"))], ca.BREAK, [],
+     ca.kit(ca.beat(kick=(0,), hat=(8,), bars=range(3)), ca.ROLL),
+     "STRINGS", "BELL", None),
+    ("OUTRO", ca.anthem_bass(range(3)) + [(48, ca.n("A1"), 16)], ca.OUTRO, FIFTHS,
      ca.minus(ca.CHORUS_KIT, set(range(49, 64)))[:48] + [8] + [0] * 15,
-     "BASS", "ORGAN"),
+     "BASS", "ORGAN", "STRINGS"),
 ]
 NAMES = [s[0] for s in SECTIONS]
 ARRANGEMENT = [(n, r) for n, r in ca.ARRANGEMENT]   # ("intro", 1), ...
@@ -42,9 +51,9 @@ arr.append(0)                                        # end -> loops from the top
 L.append("song_arr:   .byte " + ",".join(str(v) for v in arr))
 
 size = 0
-for i, (name, t1, t2, dr, p1, p2) in enumerate(SECTIONS):
-    body = [S, N, gd.PRE[p1] + 1 if p1 else 0, gd.PRE[p2] + 1 if p2 else 0]
-    for tr in (t1, t2):
+for i, (name, t1, t2, t3, dr, p1, p2, p3) in enumerate(SECTIONS):
+    body = [S, N] + [gd.PRE[p] + 1 if p else 0 for p in (p1, p2, p3)]
+    for tr in (t1, t2, t3):
         for t, nn, d in tr:
             body += [t, nn, d]
         body.append(0xFF)

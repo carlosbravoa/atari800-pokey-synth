@@ -123,6 +123,7 @@ def frame(key=None):
         mem[0xD20F] = 0x00
         mem[0xD209] = key
     call("kb_poll")
+    call("song_step")
     call("loop_step")
     call("synth")
     mem[L("POLY4B")] = 0
@@ -389,20 +390,29 @@ check(mem[L("DEMOIDX")] == len(gd.DEMOS) + 1 and mem[L("SONGON")] == 1,
       "after the last demo, > starts the built-in ANTHEM song")
 row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 29:0x4000 + 10 * 40 + 39])
 check(row == "<ANTHEM  >", f"row 10 shows '{row}'")
-SEC = 64 * 7                             # the song's sections: 64 steps x S=7
-check(w(L("LLENLO")) == SEC and mem[L("LSTATE")] == 2, f"section 1 playing, {w(L('LLENLO'))} frames")
-sc0, bank0 = mem[L("SECTCNT")], mem[L("LBANK")]
-for _ in range(SEC + 4):                 # into the next section
+check(mem[L("SPS")] == 7 and mem[L("SNST")] == 64, f"section: {mem[L('SNST')]} steps of {mem[L('SPS')]} frames")
+# it drives the voices directly, so the lanes (a recorded loop) are untouched
+lane_before = [mem[L("MLANE") + i] for i in range(200)]
+n0 = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "NOTE3CNT", "DRUMCNT")]
+for _ in range(64 * 7):                 # one section
     frame(); main_frame()
-check(mem[L("SECTCNT")] != sc0 and mem[L("LBANK")] != bank0 and w(L("LLENLO")) == SEC,
-      f"switched to section 2 at the seam (bank {bank0} -> {mem[L('LBANK')]})")
-check(mem[L("SONGON")] == 1 and mem[L("SONGRDY")] == 1, "the next section is already prepared")
-n2 = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "DRUMCNT")]
-for _ in range(SEC): frame(); main_frame()
-got = [(mem[L(x)] - n2[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "DRUMCNT"))]
-check(all(g > 0 for g in got), f"section 2 plays bass/lead/drums {got}")
+got = [(mem[L(x)] - n0[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "NOTE3CNT", "DRUMCNT"))]
+check(got[0] > 0 and got[3] > 0 and mem[L("LSTATE")] == 0,
+      f"the intro plays bass/lead/fifths/drums {got} with the looper idle")
+check([mem[L("MLANE") + i] for i in range(200)] == lane_before, "the loop lanes are untouched")
+check(mem[L("SONGIX")] == 2, f"moved on to the arrangement's 2nd entry ({mem[L('SONGIX')]})")
+n0 = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "NOTE3CNT")]
+for _ in range(64 * 7):                 # the verse: lead comes in
+    frame(); main_frame()
+got = [(mem[L(x)] - n0[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "NOTE3CNT"))]
+check(got[1] > 0, f"the verse plays its lead melody {got}")
+n0 = mem[L("NOTE3CNT")]
+for _ in range(64 * 7):                 # the chorus: the third voice (stereo)
+    frame(); main_frame()
+check((mem[L("NOTE3CNT")] - n0) & 255 == 4 if mem[L("STEREO")] else True,
+      f"the chorus adds the fifths on voice 2 ({(mem[L('NOTE3CNT')] - n0) & 255} notes)")
 tap(BK)
-check(mem[L("SONGON")] == 0 and mem[L("LSTATE")] == 0, "BACKSPACE stops the song")
+check(mem[L("SONGON")] == 0, "BACKSPACE stops the song")
 tap(Q)
 check(mem[L("DEMOIDX")] == 1, "> then wraps back to demo 1")
 # drums-only toggle (Q) on GROOVE

@@ -316,14 +316,19 @@ ZLANE    = $94          ; lane page base (hi byte)
 ZBANK    = $95          ; $00 / $08: which lane bank a load writes to
 ; built-in song: the arrangement plays from ROM data, expanding the next
 ; section into the idle bank (what songfile.py does from the PC)
-SONGON   = $0BAD        ; 1 = the built-in song is playing
+; The built-in song is played by song_step straight onto the voices (not
+; through the looper), so it sounds like the streamed .psq -- three parts in
+; stereo -- and leaves a recorded loop alone.
+SONGON   = $0BAD        ; 1 = playing
 SONGIX   = $0BAE        ; index into song_arr (pairs)
-SONGBASE = $0BAF        ; LOOPCNT when this section started
-SONGSC   = $0BB0        ; SECTCNT as last seen
-SONGBNK  = $0BB1        ; bank the next section is prepared in
-SONGRDY  = $0BB2        ; 1 = the next section is loaded and waiting
-SONGLEN  = $0BB3        ; 2 bytes: its length
-SONGT1   = $0BB5        ;          its T1USED
+SONGREP  = $0BAF        ; repeats left of this section
+SPS      = $0BB0        ; frames per step
+SPSC     = $0BB1        ; frames into the current step
+SSTEP    = $0BB2        ; step within the section
+SNST     = $0BB3        ; steps in the section
+SDRUM    = $0BB4        ; 2 bytes: the drum bytes of this section
+STRK     = $0BB6        ; 3 tracks x (ptr lo, ptr hi, note-off step)
+SONGF    = $0BBF        ; scratch
 LS_EMPTY = 0
 LS_REC   = 1
 LS_PLAY  = 2
@@ -580,16 +585,7 @@ main_tick:
         jmp hide_help
 @hk:    lda KEYEV
         jsr handle_key
-@nk:    lda SONGON
-        beq @hl
-        lda LSTATE              ; TAB/BKSP/ESC stopped it -> song over
-        cmp #LS_PLAY
-        beq @sg
-        lda #0
-        sta SONGON
-        beq @hl
-@sg:    jsr song_tick
-@hl:    lda HELPON
+@nk:    lda HELPON
         beq @pr
         rts
 @pr:    lda PRESREQ             ; loop playback switched the sound
@@ -802,48 +798,74 @@ loop_space:
         sta LCMD
         rts
 loop_tab:
-        lda #2
+        lda SONGON
+        beq @t
+        jmp song_stop
+@t:     lda #2
         sta LCMD
         rts
-.segment "EXTRA"
 .segment "CODE"
 
-undo_last:                      ; I: put back what the last overdub wrote
-        lda LSTATE
-        cmp #LS_DUB
-        bne @go
-        lda #1                  ; leave DUB first (the VBI writes the log)
-        sta LCMD
-        jsr wait_lcmd
-@go:    lda UNDOP
-        sta ZPTR
-        lda UNDOP+1
-        sta ZPTR+1
-@lp:    lda ZPTR+1
-        cmp #>UNDOBUF
-        bne @ok
-        lda ZPTR
-        cmp #<UNDOBUF
-        beq @done
-@ok:    sec                     ; step back one entry
-        lda ZPTR
-        sbc #3
-        sta ZPTR
-        lda ZPTR+1
-        sbc #0
-        sta ZPTR+1
-        ldy #0
-        lda (ZPTR),y
-        sta ZSCR
-        iny
-        lda (ZPTR),y
-        sta ZSCR+1
-        iny
-        lda (ZPTR),y
-        ldy #0
-        sta (ZSCR),y
-        jmp @lp
-@done:  jmp undo_reset
+hide_help:
+        lda #0
+        sta HELPON
+        lda #<dlist
+        sta SDLSTL
+        lda #>dlist
+        sta SDLSTL+1
+        jsr cls                 ; rebuild the synth screen
+        lda #<static_text
+        ldx #>static_text
+        jsr print_list
+        lda PRESET
+        jsr select_preset
+        jsr draw_drums
+        lda #$FE                ; force the live rows to redraw
+        sta LASTLIT
+        sta LASTLS
+        sta LASTDEMO
+        sta LASTDRUM
+        sta DISPNOTE
+        sta LASTS
+        rts
+
+.segment "CODE"
+
+toggle_grid:                    ; SHIFT + SPACE
+        lda GRIDON
+        eor #1
+        sta GRIDON
+        lda #$FE
+        sta LASTS               ; redraw the step readout
+        rts
+
+lp_bars:
+        lda GRIDON
+        beq @x
+        lda GRIDST              ; round to the nearest bar
+        cmp #8
+        bcc @b
+        inc BARN
+@b:     lda BARN
+        bne @m
+        lda #1                  ; never shorter than one bar
+        sta BARN
+@m:     lda #0                  ; LLEN = BARN * 16 * RSTEP
+        sta LLENLO
+        sta LLENHI
+        ldx BARN
+@ml:    ldy #16
+@ms:    clc
+        lda LLENLO
+        adc RSTEP
+        sta LLENLO
+        bcc @mn
+        inc LLENHI
+@mn:    dey
+        bne @ms
+        dex
+        bne @ml
+@x:     rts
 
 toggle_chords:                  ; R: AUTO held chords on/off (this preset)
         lda P_CHORD
@@ -874,11 +896,11 @@ toggle_mute:
         rts
 
 loop_clear:
+        jsr song_stop           ; BKSP also stops the built-in song
         lda #3
         sta LCMD
         lda #0
         sta DEMOIDX
-        sta SONGON
         rts
 
 .segment "EXTRA"
@@ -933,8 +955,8 @@ load_demo:                      ; X = demo 1..NDEMO, or NDEMO+1 = the song
         jmp song_start
 @notsong:
         stx DEMOIDX
+        jsr song_stop
         lda #0
-        sta SONGON
         sta ZBANK
         dex
         lda demo_lo,x
@@ -1139,6 +1161,7 @@ detect_stereo:
         rts
 
 hush:
+        jsr song_stop
         jsr detect_stereo       ; ESC re-checks (e.g. stereo just enabled)
         lda #4                  ; stop the loop too
         sta LCMD
@@ -1931,29 +1954,6 @@ show_help:                      ; HELP (or SHIFT-/): the full key list
         ldx #>help_text
         jmp print_list
 
-hide_help:
-        lda #0
-        sta HELPON
-        lda #<dlist
-        sta SDLSTL
-        lda #>dlist
-        sta SDLSTL+1
-        jsr cls                 ; rebuild the synth screen
-        lda #<static_text
-        ldx #>static_text
-        jsr print_list
-        lda PRESET
-        jsr select_preset
-        jsr draw_drums
-        lda #$FE                ; force the live rows to redraw
-        sta LASTLIT
-        sta LASTLS
-        sta LASTDEMO
-        sta LASTDRUM
-        sta DISPNOTE
-        sta LASTS
-        rts
-
 .segment "CODE"
 
 ; ---------------------------------------------------------------------------
@@ -2043,6 +2043,7 @@ vbi:
         lda #0
         sta ATRACT
         jsr kb_poll
+        jsr song_step
         jsr stream_step
         jsr loop_step
         jsr synth
@@ -2677,268 +2678,272 @@ grid_reset:
         rts
 
 ; LLEN rounded to whole bars, so loops and overdubs stay aligned
-lp_bars:
-        lda GRIDON
-        beq @x
-        lda GRIDST              ; round to the nearest bar
-        cmp #8
-        bcc @b
-        inc BARN
-@b:     lda BARN
-        bne @m
-        lda #1                  ; never shorter than one bar
-        sta BARN
-@m:     lda #0                  ; LLEN = BARN * 16 * RSTEP
-        sta LLENLO
-        sta LLENHI
-        ldx BARN
-@ml:    ldy #16
-@ms:    clc
-        lda LLENLO
-        adc RSTEP
-        sta LLENLO
-        bcc @mn
-        inc LLENHI
-@mn:    dey
-        bne @ms
-        dex
-        bne @ml
-@x:     rts
-
-toggle_grid:                    ; SHIFT + SPACE
-        lda GRIDON
-        eor #1
-        sta GRIDON
-        lda #$FE
-        sta LASTS               ; redraw the step readout
-        rts
 
 .segment "CODE"
 
 .segment "EXTRA"
 .include "songdata.inc"
 
-; ---- built-in song: sections from ROM into the two lane banks -----------
-; load_sect expands one section (demo format minus the name) into ZBANK and
-; leaves its length in ZMUL and T1USED in A.
-load_sect:                      ; X = section 0..NSECT-1
+; ---- built-in song: a small pattern player -------------------------------
+; One step every SPS frames: each track fires the notes whose step has come
+; and releases the one whose duration ran out; the drum byte of the step is
+; hit. Track 1 -> loop voice 0, track 2 -> the lead, track 3 -> loop voice 1
+; (stereo only). SONGON also lets lv_step drive the voices.
+song_start:
+        lda #3                  ; stop the looper, leave its lanes alone
+        sta LCMD
+        jsr wait_lcmd
+        lda #0
+        sta SONGIX
+        jsr song_sect
+        lda #1
+        sta SONGON
+        rts
+
+song_stop:
+        lda #0
+        sta SONGON
+        sta GATE
+        sta ESTATE
+        sta VOLHI
+        sta V_EST
+        sta V_VHI
+        sta V_EST+VBS
+        sta V_VHI+VBS
+        lda #$FF
+        sta LITKEY
+        rts
+
+song_sect:                      ; load song_arr[SONGIX] and start it
+        ldx SONGIX
+        lda song_arr,x
+        bne @ok
+        ldx #0                  ; the arrangement ended: from the top
+        stx SONGIX
+        lda song_arr
+@ok:    ldx SONGIX
+        lda song_arr+1,x
+        sta SONGREP
+        ldx SONGIX
+        lda song_arr,x
+        sec
+        sbc #1
+        tax
         lda sect_lo,x
         sta ZPTR
         lda sect_hi,x
         sta ZPTR+1
-        jsr getb
-        sta ZSTEP
+        jsr getb                ; S, N
+        sta SPS
         sta CURS
         jsr getb
-        sta ZNST
-        jsr clear_bank          ; only this bank's lanes, only this long
-        ldy #0
-        jsr getb                ; presets at frame 0
-        sta VT4
+        sta SNST
+        ldx #0                  ; three presets
+@pre:   stx SONGF
         jsr getb
-        sta VT5
-        lda #0
-        sta ZMUL
-        sta ZMUL+1
-        lda #>PLANE
-        jsr lane_at
-        lda VT4
-        sta (ZSCR),y
-        lda #>P2LANE
-        jsr lane_at
-        lda VT5
-        sta (ZSCR),y
-        lda #>MLANE
-        jsr load_track
-        sta VT4                 ; notes on track 1?
-        lda #>M2LANE
-        jsr load_track
-        lda #0                  ; drums: one byte per step
-        sta ZEV
-@d:     jsr getb
-        beq @dn
+        ldx SONGF
+        cmp #0
+        beq @nop
+        sec
+        sbc #1
+        cpx #1
+        beq @lead
         pha
-        lda ZEV
-        jsr step_frame
-        lda #>DLANE
-        jsr lane_at
-        pla
-        ldy #0
-        sta (ZSCR),y
-@dn:    inc ZEV
-        lda ZEV
-        cmp ZNST
-        bne @d
-        lda ZNST                ; length = N * S
-        jsr step_frame
-        lda VT4
-        rts
-
-clear_bank:                     ; zero ZNST*ZSTEP bytes of all five lanes
-        lda ZNST
-        jsr step_frame
-        lda #>MLANE
-        sta ZLANE
-        ldx #5
-@ln:    lda #0
-        sta ZSCR
-        lda ZLANE
-        clc
-        adc ZBANK
-        sta ZSCR+1
-        lda ZMUL
-        sta VT4
-        lda ZMUL+1
-        sta VT5
-        ldy #0
-        lda #0
-@by:    sta (ZSCR),y
-        iny
-        bne @nw
-        inc ZSCR+1
-@nw:    dec VT4
-        lda VT4
+        cpx #0
+        beq @v0
+        ldx #VBS
+        bne @ld
+@v0:    ldx #0
+@ld:    pla
+        jsr lv_load
+        jmp @nop
+@lead:  sta PRESREQ
+@nop:   ldx SONGF
+        inx
+        cpx #3
+        bne @pre
+        ldx #0                  ; track lists follow, each ending in $FF
+@trk:   stx SONGF
+        txa
+        asl a
+        adc SONGF               ; x*3
+        tax
+        lda ZPTR
+        sta STRK,x
+        lda ZPTR+1
+        sta STRK+1,x
+        lda #$FF
+        sta STRK+2,x
+@skip:  jsr getb                ; walk to this track's terminator
         cmp #$FF
-        bne @go
-        dec VT5
-@go:    lda VT5
-        bpl @c
-        jmp @nx
-@c:     lda VT4
-        ora VT5
-        beq @nx
+        beq @done
+        jsr getb
+        jsr getb
+        jmp @skip
+@done:  ldx SONGF
+        inx
+        cpx #3
+        bne @trk
+        lda ZPTR                ; what's left is the drum byte per step
+        sta SDRUM
+        lda ZPTR+1
+        sta SDRUM+1
         lda #0
-        jmp @by
-@nx:    lda ZLANE
+        sta SSTEP
+        sta SPSC
+        rts
+
+song_step:                      ; VBI, once per frame
+        lda SONGON
+        bne @on
+        rts
+@on:    lda SPSC
         clc
-        adc #$10
-        sta ZLANE
-        dex
-        bne @ln
-        lda ZNST                ; restore ZMUL = the section length
-        jsr step_frame
+        adc #1
+        sta SPSC
+        cmp SPS
+        bcs @step
         rts
-
-song_start:
-        lda #3                  ; stop and empty whatever was playing
-        sta LCMD
-        jsr wait_lcmd
-        lda #0
-        sta ZBANK
-        sta SONGIX
-        sta SONGRDY
-        sta TEMPO
-        ldx #0
-        jsr song_load_ix        ; the arrangement's first section
-        lda #1
-        sta SONGON
-        lda #8                  ; prepare the next one in the other bank
-        sta SONGBNK
-        jsr song_prepare
-        rts
-
-song_load_ix:                   ; load song_arr[SONGIX]'s section into ZBANK
-        ldx SONGIX
-        lda song_arr,x
-        bne @ok
-        ldx #0                  ; end of the arrangement: from the top
-        stx SONGIX
-        lda song_arr
-@ok:    sec
-        sbc #1
+@step:  lda #0
+        sta SPSC
+        ldx #0                  ; ---- each track
+@t:     stx SONGF
+        txa
+        asl a
+        adc SONGF
+        tax                     ; x = track*3
+        lda STRK+2,x            ; note-off due?
+        cmp SSTEP
+        bne @non
+        lda #$FF
+        sta STRK+2,x
+        ldx SONGF
+        jsr song_off
+@non:   ldx SONGF
+        txa
+        asl a
+        adc SONGF
         tax
-        jsr load_sect
-        sta T1USED
-        lda ZMUL
-        sta LLENLO
-        lda ZMUL+1
-        sta LLENHI
-        lda #0
-        sta LBANK
-        lda #LS_STOP
-        sta LSTATE
-        lda PRESET
-        sta PRESREQ
-        lda #2                  ; play it from the top
-        sta LCMD
-        jsr wait_lcmd
-        lda LOOPCNT
-        sta SONGBASE
-        lda SECTCNT
-        sta SONGSC
-        rts
-
-song_prepare:                   ; expand the next section into the idle bank
-        lda SONGIX
+        lda STRK,x              ; the track's next triple
+        sta UPTR
+        lda STRK+1,x
+        sta UPTR+1
+        ldy #0
+        lda (UPTR),y
+        cmp #$FF
+        beq @tnx
+        cmp SSTEP
+        bne @tnx
+        iny                     ; (step, note, duration)
+        lda (UPTR),y
+        sta SONGF+1
+        iny
+        lda (UPTR),y
         clc
-        adc #2
-        tax
-        lda song_arr,x
-        bne @ok
-        ldx #0
-@ok:    lda song_arr,x
+        adc SSTEP
+        sta STRK+2,x
+        clc                     ; ptr += 3
+        lda STRK,x
+        adc #3
+        sta STRK,x
+        bcc @nc
+        inc STRK+1,x
+@nc:    lda SONGF+1
+        ldx SONGF
+        jsr song_on
+@tnx:   ldx SONGF
+        inx
+        cpx #3
+        bne @t
+        lda SDRUM               ; ---- the drum byte of this step
+        sta UPTR
+        lda SDRUM+1
+        sta UPTR+1
+        ldy SSTEP
+        lda (UPTR),y
+        beq @adv
         sec
         sbc #1
-        pha
-        lda SONGBNK
-        sta ZBANK
-        pla
-        tax
-        jsr load_sect
-        sta SONGT1
-        lda ZMUL
-        sta SONGLEN
-        lda ZMUL+1
-        sta SONGLEN+1
-        lda #0
-        sta ZBANK
-        lda #1
-        sta SONGRDY
-        rts
-
-song_tick:                      ; main thread, once per frame while SONGON
-        lda SECTCNT             ; did the VBI just switch sections?
-        cmp SONGSC
-        beq @arm
-        sta SONGSC
-        lda LOOPCNT
-        sta SONGBASE
-        lda SONGIX              ; advance the arrangement
-        clc
-        adc #2
-        tax
-        lda song_arr,x
-        bne @ix
         ldx #0
-@ix:    stx SONGIX
-        lda SONGBNK             ; the bank we just switched into is playing;
-        eor #$08                ;  the other one is free again
-        sta SONGBNK
-        lda #0
-        sta SONGRDY
-        jmp song_prepare
-@arm:   lda SONGRDY
-        beq @x
-        lda NEXTREQ
-        bne @x
-        ldx SONGIX              ; repeats of this section
-        lda song_arr+1,x
-        sec
-        sbc #1
-        sta VT4
-        lda LOOPCNT
-        sec
-        sbc SONGBASE
-        cmp VT4
+        jsr drum_start
+@adv:   inc SSTEP               ; ---- next step / section
+        lda SSTEP
+        cmp SNST
         bcc @x
-        lda SONGLEN             ; last pass: arm the seam
-        sta NEXTLEN
-        lda SONGLEN+1
-        sta NEXTLEN+1
-        lda SONGT1
-        sta NEXTT1
+        dec SONGREP
+        bne @same
+        lda SONGIX              ; on to the next entry
+        clc
+        adc #2
+        sta SONGIX
+        jmp song_sect
+@same:  lda #0                  ; another pass of the same section
+        sta SSTEP
+        ldx #0
+@rw:    stx SONGF               ; rewind the track pointers
+        txa
+        asl a
+        adc SONGF
+        tax
+        lda #$FF
+        sta STRK+2,x
+        ldx SONGF
+        inx
+        cpx #3
+        bne @rw
+        lda SONGIX              ; reload (cheap, and it re-sends presets)
+        jmp song_resect
+@x:     rts
+
+song_resect:
+        jsr song_sect
+        lda SONGREP             ; song_sect reset the repeat count
+        sta SONGREP
+        rts
+
+song_on:                        ; X = track 0-2, A = note
+        cpx #1
+        beq @lead
+        cpx #2
+        bne @v0
+        ldy STEREO              ; the fifths need POKEY2's third channel
+        beq @x
+        ldx #VBS
+        jmp lv_on
+@v0:    ldx #0
+        jmp lv_on
+@lead:  sta NOTE
         lda #1
-        sta NEXTREQ
+        sta GATE
+        lda NOTE
+        sec
+        sbc OCTBASE
+        cmp #17
+        bcc @lit
+        lda #$FF
+@lit:   sta LITKEY
+        jmp note_start
+@x:     rts
+
+song_off:                       ; X = track 0-2
+        cpx #1
+        beq @lead
+        cpx #2
+        bne @v0
+        lda STEREO
+        beq @x
+        ldx #VBS
+        jmp lv_off
+@v0:    ldx #0
+        jmp lv_off
+@lead:  lda #0
+        sta GATE
+        lda #$FF
+        sta LITKEY
+        lda ESTATE
+        beq @x
+        lda #4
+        sta ESTATE
 @x:     rts
 
 ; ---- PC stream: execute every event whose frame has come ----------------
@@ -3315,6 +3320,46 @@ loop_cmd:                       ; A = command
         sta LSTATE
         rts
 
+.segment "HIDATA"
+undo_last:                      ; I: put back what the last overdub wrote
+        lda LSTATE
+        cmp #LS_DUB
+        bne @go
+        lda #1                  ; leave DUB first (the VBI writes the log)
+        sta LCMD
+        jsr wait_lcmd
+@go:    lda UNDOP
+        sta ZPTR
+        lda UNDOP+1
+        sta ZPTR+1
+@lp:    lda ZPTR+1
+        cmp #>UNDOBUF
+        bne @ok
+        lda ZPTR
+        cmp #<UNDOBUF
+        beq @done
+@ok:    sec                     ; step back one entry
+        lda ZPTR
+        sbc #3
+        sta ZPTR
+        lda ZPTR+1
+        sbc #0
+        sta ZPTR+1
+        ldy #0
+        lda (ZPTR),y
+        sta ZSCR
+        iny
+        lda (ZPTR),y
+        sta ZSCR+1
+        iny
+        lda (ZPTR),y
+        ldy #0
+        sta (ZSCR),y
+        jmp @lp
+@done:  jmp undo_reset
+
+.segment "CODE"
+
 .segment "HIDATA"                ; (code runs from any segment)
 ; ---- loop voices: wave, ADSR, chord; X = block (0 or VBS) --------------
 lv_load:                        ; A = preset: copy its live params
@@ -3373,7 +3418,8 @@ v2_owns:                        ; Z clear (bne) when slot 0 owns POKEY1 ch3
         rts
 
 lv_step:                        ; VBI, X = block
-        lda STREAMON            ; a PC stream drives the voices directly
+        lda STREAMON            ; a PC stream or the built-in song drives
+        ora SONGON              ;  the voices directly
         bne @go2
         lda LSTATE
         cmp #LS_PLAY
