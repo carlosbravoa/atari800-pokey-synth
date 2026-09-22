@@ -693,6 +693,11 @@ while mem[L("LSTATE")] == 5 and n < 16 * RS + 8:
 check(mem[L("LSTATE")] == 1 and 16 * RS - 2 <= n <= 16 * RS and w(L("LPOSLO")) == 0,
       f"one bar of count-in ({n} frames, one already spent on the SPACE frame), REC from 0")
 check((mem[L("DRUMCNT")] - d0) & 255 == 4, "4 metronome clicks during the count-in")
+row = [mem[0x4000 + 10 * 40 + 12 + i] for i in range(16)]
+cur = [i for i, c in enumerate(row) if c == ord('f')]
+beats = [i for i, c in enumerate(row) if c == ord('h')]
+check(len(cur) == 1 and cur[0] == mem[L("GRIDST")] and beats == [i for i in (0, 4, 8, 12) if i != cur[0]],
+      f"step cursor on the loop row: at {cur}, beats marked {beats}")
 # play three notes off the grid; they must land on 16th boundaries
 for off in (3, 5, 2):
     for _ in range(off): frame()

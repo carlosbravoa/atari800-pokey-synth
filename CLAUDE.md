@@ -221,6 +221,11 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
   Note-ons and drums are written at VP + SNAPD (`snap_vp`/`unsnap_vp`,
   which is also what `undo_push` logs). Note-offs keep their real timing,
   so phrasing survives.
+- **Visual metronome**: during COUNT/REC/DUB (with the grid on) the loop
+  row's 16 cells become one bar of 16ths: a bright cell is the current
+  step, half cells mark the four beats. It's drawn by the main thread
+  (LASTCELL holds `$20|GRIDST` in this mode, a domain LCELL never uses, so
+  switching modes always redraws). PLAY keeps the loop progress bar.
 - **Whole bars**: `lp_bars` rounds LLEN at close to BARN x 16 x RSTEP
   (rounding up from half a bar, minimum one bar), so loops, overdubs and
   song sections line up. Events past the rounded end are dropped.

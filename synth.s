@@ -1270,7 +1270,36 @@ ui_update:
         bne @ls
         lda #$FE
         sta LASTCELL
-@lc:    lda LCELL
+@lc:    lda GRIDON              ; while recording the bar becomes a step
+        beq @prog               ;  cursor: 16 cells = one bar of 16ths
+        lda LSTATE
+        cmp #LS_REC
+        beq @beat
+        cmp #LS_CNT
+        beq @beat
+        cmp #LS_DUB
+        bne @prog
+@beat:  lda GRIDST              ; (a domain LCELL never uses, so a mode
+        ora #$20                ;  change always redraws)
+        cmp LASTCELL
+        beq @mv
+        sta LASTCELL
+        ldx #0
+@bb:    txa
+        and #3                  ; the four beats stay marked
+        beq @bm
+        lda #G_O
+        bne @bc
+@bm:    lda #G_H
+@bc:    cpx GRIDST              ; the moving step
+        bne @bs
+        lda #G_F
+@bs:    sta SCREEN+10*40+12,x
+        inx
+        cpx #16
+        bne @bb
+        beq @mv
+@prog:  lda LCELL
         cmp LASTCELL
         beq @mv
         sta LASTCELL
