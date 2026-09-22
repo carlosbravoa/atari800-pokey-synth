@@ -2538,13 +2538,21 @@ grid_step:
 @beat:  lda GRIDST
         and #3                  ; click on each beat (every 4 steps)
         bne @x
-        lda GRIDST
+        ldx #0                  ; the click must never cut off the player:
+        lda STEREO              ;  stereo -> POKEY2 ch4 (its own channel),
+        beq @mono               ;  mono -> only when no drum of theirs rings
+        ldx #8
+        lda D_TMR+8             ; (in DUB the loop's drums have it)
+        bne @x
+        beq @pick
+@mono:  lda D_TMR
+        bne @x
+@pick:  lda GRIDST
         bne @cl
         lda #5                  ; bar line: the accent
         bne @go
 @cl:    lda #2                  ; other beats: a lighter click
-@go:    ldx #0
-        jmp drum_start
+@go:    jmp drum_start
 @x:     rts
 
 snap_vp:                        ; VP -> the nearest grid step

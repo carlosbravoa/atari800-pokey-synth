@@ -211,7 +211,11 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
 - **Metronome**: `grid_step` clicks every 4 steps (accent = tom2 on the
   bar line, hat elsewhere) during count-in, REC and DUB. It calls
   `drum_start`, not `drum_trig`, so it never reaches LIVED and is never
-  recorded.
+  recorded. **The click must never cut the player off**: in stereo it runs
+  on POKEY2's drum block (block 8, skipped while the loop's own drums ring
+  in DUB); in mono it shares ch4, so it is skipped whenever a drum of the
+  player's is still sounding. (First version clicked on block 0
+  unconditionally and made percussion impossible to record.)
 - **Snap**: `grid_step` also sets SNAPD, the signed distance to the
   nearest step (no division: STEPPOS counts frames since the last step).
   Note-ons and drums are written at VP + SNAPD (`snap_vp`/`unsnap_vp`,
