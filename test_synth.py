@@ -336,14 +336,14 @@ check(mem[0xD205] & 0xF0 == 0xA0 and mem[0xD205] & 0x0F > 5
 for _ in range(20): frame()
 tap(BK)
 
-# 11. built-in demos: Q loads + plays; lanes match demos.inc; names show
+# 11. built-in demos: > loads + plays; lanes match demos.inc; names show
 import importlib.util
 spec = importlib.util.spec_from_file_location("gd", "gen_demos.py")
 gd = importlib.util.module_from_spec(spec)
 import contextlib, io
 with contextlib.redirect_stdout(io.StringIO()):
     spec.loader.exec_module(gd)
-Q = 0x2F
+Q, PREV = 0x37, 0x36                    # '>' next, '<' previous
 for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
     tap(Q)
     LL = w(L("LLENLO"))
@@ -362,9 +362,14 @@ for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
     want = [len(t1), len(t2), sum(1 for v in dr if v)]
     check(got == want, f"  one pass plays voice2/lead/drums {got} (want {want})")
     row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 29:0x4000 + 10 * 40 + 39])
-    check(row.strip() == f"Q:{name}", f"  row 10 shows '{row}'")
+    check(row == f"<{name:<8}>", f"  row 10 shows '{row}'")
 tap(Q)
-check(mem[L("DEMOIDX")] == 1, "Q wraps back to demo 1")
+check(mem[L("DEMOIDX")] == 1, "> wraps back to demo 1")
+tap(PREV)
+check(mem[L("DEMOIDX")] == len(gd.DEMOS) and w(L("LLENLO")) == gd.DEMOS[-1][1] * gd.DEMOS[-1][2],
+      "< from demo 1 wraps to the last demo")
+tap(PREV)
+check(mem[L("DEMOIDX")] == len(gd.DEMOS) - 1, "< steps back one")
 tap(BK)
 check(mem[L("DEMOIDX")] == 0 and mem[L("LSTATE")] == 0, "BACKSPACE clears the demo")
 for _ in range(3): frame(); main_frame()

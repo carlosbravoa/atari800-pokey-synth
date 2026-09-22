@@ -41,7 +41,7 @@ The first key() of a link session is often lost; send a throwaway first.
 | `SPACE` | looper: record -> close loop (plays) -> overdub (drums + melody) <-> play |
 | `TAB` | looper: stop / play from the top |
 | `BACKSPACE` | looper: clear |
-| `Q` | built-in demo loops: next demo (loads + plays; jam or overdub on it) |
+| `<` `>` (PC `-` `=`) | built-in demo loops: previous / next (loads + plays; jam or overdub on it) |
 
 Edits are kept per preset (the `live` table) until RETURN.
 
@@ -171,7 +171,7 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$4000-$43BF` | screen |
 | `$4400-$4FFF` | HIDATA segment: pitch/env/key tables + demos |
 
-## Built-in demos (Q)
+## Built-in demos (< >)
 
 Six demos: GROOVE, TECHNO, CHIPTUNE, DREAMY, ROCK, SPACE. They are defined
 in `gen_demos.py` with readable note names and generated into `demos.inc`.
@@ -181,8 +181,8 @@ Format per demo: name(8) S N P1 P2, then T1 (step, note, dur)… $FF, then T2
 step·S and note-off 2 frames before (step+dur)·S. It then sets LLEN and
 T1USED, sets LSTATE = STOP, and posts TAB to play from the top. A demo is
 a normal loop from then on: SPACE overdubs on it, TAB and BKSP work.
-DEMOIDX `$066F` (1..6, 0 = none) shows as `Q:<NAME>` on row 10.
-`hwdemo.py` presses Q through all six on hardware and checks each one's
+DEMOIDX `$066F` (1..6, 0 = none) shows as `<NAME    >` on row 10. The PC `-`/`=` mapping holds in the board's default Atari-positional layout only; in its PC-symbolic layout those keys type Atari `-`/`=`, which are the editor's up/down.
+`hwdemo.py` presses > (PC `=`) through all six, then < to wrap back, on hardware and checks each one's
 per-pass voice-2/lead/drum counts against the generator's data. To add a
 demo, add a `demo(...)` call. The py65 and hardware tests pick it up.
 

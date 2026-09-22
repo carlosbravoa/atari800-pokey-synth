@@ -235,7 +235,8 @@ NOTE2CNT = $066D        ; +1 per voice-2 note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
 LASTDEMO = $0670        ; main: demo name as drawn
-K_Q      = $2F
+K_LT     = $36          ; '<' (PC '-' in Atari layout): previous demo
+K_GT     = $37          ; '>' (PC '='): next demo
 ; demo loader ZP (main thread)
 ZMUL     = $8D          ; 16-bit product / frame
 ZSTEP    = $8F          ; frames per step (S)
@@ -677,13 +678,21 @@ loop_clear:
         sta DEMOIDX
         rts
 
-; ---- built-in demos: Q cycles, loads and plays -----------------------------
+; ---- built-in demos: < > step through them; each loads and plays ---------
+prev_demo:
+        ldx DEMOIDX
+        dex
+        beq @w
+        bpl load_demo
+@w:     ldx #NDEMO
+        bne load_demo
 next_demo:
         ldx DEMOIDX
         cpx #NDEMO
         bcc @n
         ldx #0
 @n:     inx
+load_demo:                      ; X = demo 1..NDEMO
         stx DEMOIDX
         dex
         lda demo_lo,x
@@ -1025,7 +1034,7 @@ ui_update:
         bne @mc
         rts
 
-draw_demo:                      ; row 10 col 29: "Q DEMOS" / "Q:<name>"
+draw_demo:                      ; row 10 col 29: "< DEMOS  >" / "<NAME    >"
         ldx #0
         lda DEMOIDX
         bne @nm
@@ -1042,15 +1051,15 @@ draw_demo:                      ; row 10 col 29: "Q DEMOS" / "Q:<name>"
         sta ZPTR
         lda demo_hi,x
         sta ZPTR+1
-        lda #'Q'-32
+        lda #'<'-32
         sta SCREEN+10*40+29
-        lda #':'-32
-        sta SCREEN+10*40+30
+        lda #'>'-32
+        sta SCREEN+10*40+38
         ldy #0
 @c:     lda (ZPTR),y
         jsr asc2int
         ora #$80
-        sta SCREEN+10*40+31,y
+        sta SCREEN+10*40+30,y
         iny
         cpy #8
         bne @c
@@ -2665,16 +2674,16 @@ dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
-            .byte K_SPACE,K_TAB,K_BKSP,K_Q
-NCMD = 12
+            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT
+NCMD = 13
 cmdlo:      .byte <(oct_down-1),<(oct_up-1),<(ed_up-1),<(ed_down-1)
             .byte <(ed_left-1),<(ed_right-1),<(reset_preset-1),<(hush-1)
-            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(next_demo-1)
+            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(prev_demo-1),<(next_demo-1)
 cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
-            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(next_demo-1)
+            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1)
 lsnames:    .byte "EMPTYREC  PLAY DUB  STOP "
-qdemotxt:   .byte "Q DEMOS   "
+qdemotxt:   .byte "< DEMOS  >"
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30,$32   ; 1..9, 0
 presetkey:  .byte "1234567890"
 

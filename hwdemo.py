@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware check of the built-in demos: press Q (real HID key) through all
+"""Hardware check of the built-in demos: press > (PC '=' key) through all
 of them; each must load, play, and replay its data every pass."""
 import sys, time, importlib.util, io, contextlib
 sys.path.insert(0, "/home/carlos/devel/fpga/atari800_tang_nano20k_parallel/tools")
@@ -9,7 +9,7 @@ spec = importlib.util.spec_from_file_location("gd", "gen_demos.py")
 gd = importlib.util.module_from_spec(spec)
 with contextlib.redirect_stdout(io.StringIO()):
     spec.loader.exec_module(gd)
-Q, ESC, BKSP = 0x14, 0x29, 0x2A
+Q, PREV, ESC, BKSP = 0x2E, 0x2D, 0x29, 0x2A   # PC '=' -> Atari '>', '-' -> '<'
 ok = True
 
 
@@ -28,7 +28,7 @@ with AtariLink() as l:
         b = st()
         LL = b[0x4D] | b[0x4E] << 8
         check(b[0x6F] == di + 1 and LL == N * S and b[0x49] == 2,
-              f"Q -> demo {di + 1} {name}: {LL} frames, state {b[0x49]}")
+              f"> -> demo {di + 1} {name}: {LL} frames, state {b[0x49]}")
         c = st()[0x58]
         while st()[0x58] == c:
             pass
@@ -41,5 +41,9 @@ with AtariLink() as l:
         check(got == want, f"  one pass voice2/lead/drums {got} (want {want})")
         print("  " + l.screen().split("\n")[10].strip())
     l.key(Q, hold_ms=100); time.sleep(0.5)
-    check(st()[0x6F] == 1, "Q wraps to GROOVE (left playing)")
+    check(st()[0x6F] == 1, "> wraps to GROOVE")
+    l.key(PREV, hold_ms=100); time.sleep(0.5)
+    check(st()[0x6F] == len(gd.DEMOS), "< wraps back to the last demo")
+    l.key(Q, hold_ms=100); time.sleep(0.5)
+    check(st()[0x6F] == 1, "> again: GROOVE (left playing)")
 print("ALL PASS" if ok else "SOME FAILED")
