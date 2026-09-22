@@ -271,6 +271,14 @@ GRIDST   = $0BA3        ; step within the bar (0-15)
 BARN     = $0BA4        ; bars recorded so far
 GRIDON   = $0BA5        ; 1 = metronome + snap + whole-bar loops
 BFLASH   = $0BA6        ; frames left of the bar-line border flash
+; PC-streamed playback: a ring of timed events the bridge fills ahead of
+; time, so link jitter can't reach the music (see loopfile/psq tools).
+SRING    = $1C00        ; 256 entries x (frame lo, frame hi, cmd, arg)
+STREAMON = $0BA7        ; 1 = the stream owns the voices it addresses
+SHEAD    = $0BA8        ; Atari consumes here
+STAIL    = $0BA9        ; the PC writes here
+SFRAME   = $0BAA        ; 2 bytes: 16-bit frame clock, the stream's timebase
+SEVCNT   = $0BAC        ; events executed (liveness for the PC)
 LS_CNT   = 5            ; counting in (one bar of clicks before REC)
 UPTR     = $F2          ; VBI-owned ZP (with VP $F0-$F1)
 K_I      = $0D          ; undo
@@ -1997,6 +2005,7 @@ vbi:
         lda #0
         sta ATRACT
         jsr kb_poll
+        jsr stream_step
         jsr loop_step
         jsr synth
         lda #0
@@ -2668,6 +2677,167 @@ toggle_grid:                    ; SHIFT + SPACE
 
 .segment "CODE"
 
+.segment "EXTRA"
+
+; ---- PC stream: execute every event whose frame has come ----------------
+stream_step:
+        inc SFRAME              ; the stream's 16-bit frame clock
+        bne @f
+        inc SFRAME+1
+@f:     lda STREAMON
+        bne stream_loop
+        rts
+stream_loop:
+        lda SHEAD
+        cmp STAIL
+        bne @ev
+        rts                     ; the ring is empty: nothing due
+@ev:    sta UPTR                ; UPTR = SRING + head*4
+        lda #0
+        sta UPTR+1
+        asl UPTR
+        rol UPTR+1
+        asl UPTR
+        rol UPTR+1
+        lda UPTR+1
+        clc
+        adc #>SRING
+        sta UPTR+1
+        ldy #1                  ; due when event frame <= SFRAME
+        lda SFRAME+1
+        cmp (UPTR),y
+        bcc @no
+        bne @due
+        dey
+        lda SFRAME
+        cmp (UPTR),y
+        bcc @no
+@due:   ldy #2
+        lda (UPTR),y
+        sta VT0                 ; cmd
+        iny
+        lda (UPTR),y
+        sta VT1                 ; arg
+        inc SHEAD
+        inc SEVCNT
+        ldx VT0
+        cpx #SCMDN
+        bcs stream_loop         ; unknown command: ignore
+        lda scmd_hi,x
+        pha
+        lda scmd_lo,x
+        pha
+        lda VT1                 ; A = arg for the handler
+        rts                     ; ... which returns into @lp
+@no:    rts
+
+; stream commands (A = arg). Each returns to stream_step's loop.
+sc_non: ldx #0                  ; 0: lead note-on (recordable, lights a key)
+        jmp sc_lead
+sc_v0n: ldx #0                  ; 2: loop voice 0 note-on
+        jsr lv_on
+        jmp stream_next
+sc_v0f: ldx #0
+        jsr lv_off
+        jmp stream_next
+sc_v1n: ldx #VBS                ; 4: loop voice 1 note-on
+        jsr lv_on
+        jmp stream_next
+sc_v1f: ldx #VBS
+        jsr lv_off
+        jmp stream_next
+sc_lead:
+        sta NOTE
+        clc
+        adc #1
+        sta LIVEM               ; so a recording captures the stream
+        lda #1
+        sta GATE
+        lda NOTE
+        sec
+        sbc OCTBASE             ; light the key if it's on screen
+        cmp #17
+        bcc @lit
+        lda #$FF
+@lit:   sta LITKEY
+        jsr note_start
+        jmp stream_next
+sc_nof: lda #0                  ; 1: lead note-off
+        sta GATE
+        lda #$FE
+        sta LIVEM
+        lda #$FF
+        sta LITKEY
+        lda ESTATE
+        beq stream_next
+        lda #4
+        sta ESTATE
+        jmp stream_next
+sc_dr0: ldx #0                  ; 6: drum on POKEY1 ch4 (recordable)
+        jsr drum_trig
+        jmp stream_next
+sc_dr1: ldx #8                  ; 7: drum on POKEY2 ch4
+        jsr drum_start
+        jmp stream_next
+sc_pre: sta PRESREQ             ; 8: the lead's preset (main thread loads it)
+        jmp stream_next
+sc_p0:  ldx #0                  ; 9: voice 0's preset
+        jsr lv_load
+        jmp stream_next
+sc_p1:  ldx #VBS                ; 10: voice 1's preset
+        jsr lv_load
+        jmp stream_next
+sc_par: tax                     ; 11: arg = param<<4 | value
+        and #$0F
+        sta VT2
+        txa
+        lsr a
+        lsr a
+        lsr a
+        lsr a
+        cmp #NPARAM
+        bcs stream_next
+        tax
+        lda VT2
+        sta PARAMS,x
+        jmp stream_next
+sc_off: jsr stream_hush         ; 12: everything off
+        jmp stream_next
+sc_end: lda #0                  ; 13: end of stream
+        sta STREAMON
+        jsr stream_hush
+        jmp stream_next
+
+stream_hush:
+        lda #0
+        sta GATE
+        sta ESTATE
+        sta VOLHI
+        sta V_EST
+        sta V_VHI
+        sta V_EST+VBS
+        sta V_VHI+VBS
+        sta D_TMR
+        sta D_TMR+8
+        lda #$FF
+        sta LITKEY
+        rts
+
+stream_next:
+        jmp stream_loop
+
+scmd_lo:    .byte <(sc_non-1),<(sc_nof-1),<(sc_v0n-1),<(sc_v0f-1)
+            .byte <(sc_v1n-1),<(sc_v1f-1),<(sc_dr0-1),<(sc_dr1-1)
+            .byte <(sc_pre-1),<(sc_p0-1),<(sc_p1-1),<(sc_par-1)
+            .byte <(sc_off-1),<(sc_end-1)
+scmd_hi:    .byte >(sc_non-1),>(sc_nof-1),>(sc_v0n-1),>(sc_v0f-1)
+            .byte >(sc_v1n-1),>(sc_v1f-1),>(sc_dr0-1),>(sc_dr1-1)
+            .byte >(sc_pre-1),>(sc_p0-1),>(sc_p1-1),>(sc_par-1)
+            .byte >(sc_off-1),>(sc_end-1)
+SCMDN = 14
+
+.segment "CODE"
+
 undo_push:                      ; log what an overdub is about to overwrite
         pha
         lda UNDOP+1
@@ -2941,6 +3111,8 @@ v2_owns:                        ; Z clear (bne) when slot 0 owns POKEY1 ch3
         rts
 
 lv_step:                        ; VBI, X = block
+        lda STREAMON            ; a PC stream drives the voices directly
+        bne @go2
         lda LSTATE
         cmp #LS_PLAY
         beq @pl
@@ -2974,6 +3146,19 @@ lv_step:                        ; VBI, X = block
         rts
 @i1:    sta SAUDC3+P2
 @x:     rts
+@go2:   lda STEREO              ; stream: slot 0 = POKEY2 pair (stereo) or
+        bne @gs                 ;  POKEY1 ch3 (mono); slot 1 = POKEY2 ch3
+        cpx #0
+        bne @idle
+        ldy #$04
+        lda #0
+        beq @go
+@gs:    ldy #P2
+        lda #1
+        cpx #0
+        beq @go
+        ldy #$04+P2
+        lda #0
 @go:    sty VT2                 ; AUDF register offset
         sta VT3                 ; 1 = 16-bit pair
         lda #0

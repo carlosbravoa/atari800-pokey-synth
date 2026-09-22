@@ -175,6 +175,61 @@ def main():
         "anthem_outro 1\n")
     import songfile
     songfile.pack("anthem")
+    write_psq()
+
+
+# ---- the same arrangement as a streamed sequence (.psq) --------------------
+# Streaming has no memory limit and one more voice than the looper, so the
+# chorus gains a third part: bar-long fifths under the hook.
+ARRANGEMENT = [("intro", 1), ("verse", 1), ("chorus", 2), ("verse", 1),
+               ("chorus", 2), ("break", 1), ("chorus", 2), ("outro", 1)]
+FIFTHS = ["E4", "C4", "G4", "D4"]                # over Am F C G
+
+
+def write_psq():
+    import psq
+    parts = dict(
+        intro=(anthem_bass(range(3)) + eighths(3, "G"), [], None,
+               kit(beat(kick=(0, 8), hat=(2, 6, 10, 14), bars=range(3)),
+                   dict(kick=[48]), ROLL), "BASS", None),
+        verse=(quarter_bass(), VERSE, None,
+               kit(beat(kick=(0, 8), snare=(4, 12), hat=(2, 6, 10, 14))),
+               "BASS", "FLUTE"),
+        chorus=(anthem_bass(), HOOK, FIFTHS, CHORUS_KIT, "BASS", "ORGAN"),
+        **{"break": ([(bar * 16, n(p), 16) for bar, p in
+                      enumerate(("A3", "F3", "C4", "G3"))], BREAK, None,
+                     kit(beat(kick=(0,), hat=(8,), bars=range(3)), ROLL),
+                     "STRINGS", "BELL")},
+        outro=(anthem_bass(range(3)) + [(48, n("A1"), 16)], OUTRO, FIFTHS,
+               minus(CHORUS_KIT, set(range(49, 64)))[:48] + [8] + [0] * 15,
+               "BASS", "ORGAN"),
+    )
+    w = psq.Writer("ANTHEM", mode=psq.STEREO, tracks=3, drums=1)
+    t, last = 0, {}
+    for name, reps in ARRANGEMENT:
+        t1, t2, fifths, dr, p1, p2 = parts[name]
+        for _ in range(reps):
+            for track, preset in ((1, p1), (0, p2)):
+                if preset and last.get(track) != preset:
+                    w.preset(t, track, preset)
+                    last[track] = preset
+            if fifths and last.get(2) != "STRINGS":
+                w.preset(t, 2, "STRINGS")
+                last[2] = "STRINGS"
+            for step, note, dur in t1:
+                w.play(t + step * S, 1, note, dur * S)
+            for step, note, dur in t2:
+                w.play(t + step * S, 0, note, dur * S)
+            for bar, name5 in enumerate(fifths or []):
+                w.play(t + bar * 16 * S, 2, n(name5), 16 * S, gap=4)
+            for step, d in enumerate(dr):
+                if d:
+                    w.drum(t + step * S, d - 1)
+            t += N * S
+    w.at(t, psq.ALLOFF)
+    path = w.save(os.path.join(HERE, "songs/anthem.psq"))
+    h, ev = psq.read(path)
+    print("  " + psq.describe(h, ev) + f"  -> {os.path.getsize(path)} bytes")
 
 
 if __name__ == "__main__":

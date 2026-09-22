@@ -29,6 +29,10 @@ load:
 loops:
 	python3 loopfile.py list
 
+# stream a .psq sequence from the PC (no Atari memory limits)
+stream:
+	python3 pcplay.py $(NAME)
+
 # songs: songs/NAME.song = one "<loop> [repeats]" per line
 song:
 	python3 songfile.py play $(NAME)
@@ -39,4 +43,4 @@ pack:
 clean:
 	rm -rf build
 
-.PHONY: all deploy clean save load loops song pack
+.PHONY: all deploy clean save load loops song pack stream

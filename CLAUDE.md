@@ -123,6 +123,39 @@ python3 loopfile.py list        #     make loops
   lanes, edit restored, same per-pass playback, and EMPTY refused. It sets
   EDSEL itself, since the editor selection persists across sessions.
 
+## Streamed sequences (.psq) — the PC drives the voices
+
+```bash
+python3 pcplay.py songs/anthem.psq [--loop]   # or: make stream NAME=anthem
+python3 psq.py songs/anthem.psq               # what's in a file
+python3 test_psq.py                           # format unit tests (no Atari)
+```
+
+- **Not stored on the Atari**: the PC sends timed events, the VBI plays each
+  on its frame. No length limit, and one more voice than the looper has.
+- **Atari side**: SRING `$1C00` = 256 entries of (frame lo, frame hi, cmd,
+  arg); SHEAD `$0BA8` (Atari consumes), STAIL `$0BA9` (PC writes), SFRAME
+  `$0BAA` 16-bit frame clock, SEVCNT `$0BAC`, STREAMON `$0BA7`.
+  `stream_step` runs first in the VBI (before loop_step, so streamed notes
+  can be recorded into a loop) and executes every event whose frame has
+  come, via a jump table. STREAMON also makes `lv_step` drive the loop
+  voices outside loop playback.
+- **Commands**: 0/1 lead note on/off, 2/3 voice 0, 4/5 voice 1, 6/7 drums
+  (POKEY1/POKEY2 ch4), 8/9/10 presets, 11 param (`param<<4|value`),
+  12 all-off, 13 end (clears STREAMON).
+- **Format** (`psq.py`, docstring is the spec): 32-byte header (magic, mode
+  mono/stereo/either, melodic tracks, drum channels, rate, frames, title)
+  then delta-coded events. Polyphony = simultaneous tracks; each track is
+  monophonic. `to_commands` folds a stereo file for a mono machine (drops
+  track 2, merges drum channel 1) and reports how many events that cost.
+- **Player** (`pcplay.py`): fills the ring ~90 frames ahead, so link jitter
+  never reaches the music; `--loop` re-times the next pass seamlessly;
+  Ctrl-C stops and silences.
+- `compose_anthem.py` also writes `songs/anthem.psq`: the same arrangement
+  plus a third voice (bar-long fifths), 83 s, 556 notes, ~4 KB.
+- **Memory**: the ring sits above the EXTRA segment (`LOMEM` is capped at
+  `$1BFF` in the linker config for exactly this reason).
+
 ## Songs (PC-streamed sections, gapless)
 
 ```bash
