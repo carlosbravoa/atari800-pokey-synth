@@ -19,7 +19,17 @@ build/synth.xex: synth.s tables.inc demos.inc atari-xex.cfg
 deploy: all
 	python3 deploy.py
 
+# loops over the PC link:  make save NAME=mysong / make load NAME=mysong
+save:
+	python3 loopfile.py save $(NAME)
+
+load:
+	python3 loopfile.py load $(NAME)
+
+loops:
+	python3 loopfile.py list
+
 clean:
 	rm -rf build
 
-.PHONY: all deploy clean
+.PHONY: all deploy clean save load loops

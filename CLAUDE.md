@@ -73,6 +73,35 @@ Edits are kept per preset (the `live` table) until RETURN.
   posted to the main thread (KEYEV/KEYSEQ). Legato: with GLIDE > 0 a new note
   while sounding keeps the envelope.
 
+## Save / load loops (PC side, over the link)
+
+```bash
+python3 loopfile.py save NAME   # or: make save NAME=...  -> loops/NAME.psl
+python3 loopfile.py load NAME   #     make load NAME=...  (plays at once)
+python3 loopfile.py info NAME   # notes / hits / sounds in a file
+python3 loopfile.py list        #     make loops
+```
+
+- No 6502 code: the loop is plain RAM. **save** reads LLEN, T1USED, the five
+  lanes (LLEN bytes each) and the 130-byte `live` preset table, so your
+  sound edits travel with the loop. Each block is read twice until two
+  reads agree (stale-peek guard). It refuses EMPTY and REC. In DUB it saves
+  what's recorded so far.
+- **load** uses the demo sequence: LCMD 3 (the VBI empties the loop), write
+  and verify the lanes and presets, then LLEN, T1USED, DEMOIDX 0, LSTATE
+  STOP, PRESREQ = the current preset (reloads its edited sound), and
+  LCMD 2 (play from the top).
+- Both check that the Atari runs *this* build first: the 64 static bytes
+  before `live` must match `build/synth.xex`, because `live`'s address
+  comes from `build/synth.lbl`. A different build gets "make deploy first"
+  instead of a write to the wrong address.
+- File: `PSL1` + zlib(LLEN, T1USED, M1, D, P1, M2, P2, presets). A
+  2-bar demo is about 160 bytes. Files keep working across builds as long
+  as the lane layout and preset format don't change.
+- `hwsave.py`: demo + preset edit -> save -> wipe -> load -> identical
+  lanes, edit restored, same per-pass playback, and EMPTY refused. It sets
+  EDSEL itself, since the editor selection persists across sessions.
+
 ## Chords (polyphony without two keys)
 
 - CHORD values: OFF MAJOR MINOR 7TH OCTAVE POWER DIM **AUTO**. AUTO is
