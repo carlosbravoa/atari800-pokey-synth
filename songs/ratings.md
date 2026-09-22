@@ -41,3 +41,16 @@ fails. Coverage is what `midi2psq.py` reported at conversion time.
 - Next step: try picking the lead by note density and melodic motion
   (steps rather than leaps, few simultaneous notes) instead of register
   plus coverage, and re-rate the three bad cases.
+
+## After the stereo-mirror fix (all voices audible)
+
+| file | rating | notes |
+|---|---|---|
+| kalinka | 5+ ("REALLY AWESOME") | same file as before; the difference was the mirror bug |
+| smkrainbow | 4 (was 1-2) | auto-pick 3:2 lead; the fix, not the picker, was the problem |
+| StarmanE | 5 (was 1-2) | unchanged pick (1:1 lead); the mirror bug was the whole problem |
+| dbztheme | 5 (was "terrible") | type-0 file; unchanged pick, the mirror bug again |
+
+**Conclusion:** the part picker was not the problem. One playback bug
+made every 3-part conversion sound like lead + drums. Re-rate before
+tuning heuristics on ears.
