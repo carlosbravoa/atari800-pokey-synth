@@ -150,6 +150,33 @@ music the `.psq` streams.
   anything now means moving code between segments first; all three are
   nearly full.
 
+## MIDI -> .psq (`midi2psq.py`)
+
+```bash
+python3 midi2psq.py song.mid --inspect          # tracks AND channels
+python3 midi2psq.py song.mid --lead 1,5 --bass 3,4 --harm 2,6 --drums 7,8,9,10 \
+    --title KALINKA -o songs/kalinka.psq
+python3 pcplay.py songs/kalinka.psq
+```
+
+- Parts are `track` or `track:channel`, both 1-based. Type-0 files keep
+  everything in one track, so channels are how you pick parts there; the
+  inspector prints a ready-made `--lead N:C` for each channel.
+- Each part is reduced to one voice (the synth's tracks are monophonic):
+  lead keeps the top note of a chord, bass the bottom, `--harm-second`
+  takes the second note down when the harmony comes from the lead's own
+  tracks. Several parts feeding one voice mask by priority (`overlay`), so
+  an arrangement that hands the tune over stays whole. This reuses
+  `tools/midi2pokey.py` (skill `atari-music`).
+- Range: MIDI 24-119 (C1-B8). A part outside it is transposed by whole
+  octaves, and stragglers are dropped, both reported.
+- Drums: GM percussion (channel 10) mapped onto the 8 pads (`GM_DRUM`);
+  unmapped notes become hats and are reported.
+- Timing is kept to the frame (59.92/s), with no grid quantization.
+- `--start/--end` cut a section, `--transpose`, `--preset-lead/bass/harm`
+  pick the sounds. Verified on hardware with `tetris_karinka.mid`
+  (112 s, 966 notes + 812 hits) and `canyon.mid` (type 0, by channel).
+
 ## Streamed sequences (.psq) — the PC drives the voices
 
 ```bash

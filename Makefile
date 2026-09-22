@@ -32,6 +32,10 @@ load:
 loops:
 	python3 loopfile.py list
 
+# MIDI -> .psq:  make midi MID=song.mid ARGS="--lead 1 --bass 3 --drums 10"
+midi:
+	python3 midi2psq.py $(MID) $(ARGS)
+
 # stream a .psq sequence from the PC (no Atari memory limits)
 stream:
 	python3 pcplay.py $(NAME)
@@ -46,4 +50,4 @@ pack:
 clean:
 	rm -rf build
 
-.PHONY: all deploy clean save load loops song pack stream
+.PHONY: all deploy clean save load loops song pack stream midi
