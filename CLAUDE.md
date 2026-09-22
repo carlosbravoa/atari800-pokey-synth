@@ -171,10 +171,18 @@ for new songs. `songfile.py play anthem` verified on hardware: passes
   melody). ch4 yields to a drum on block 0 for the drum's length: POLY4
   `$0675` marks a frame where the chord owns ch4, so `drum_one` doesn't
   silence it.
-- Loop voices ignore POLY (root only) and play AUTO as a MAJOR arpeggio,
-  so the demos are unchanged. Recorded notes replay on the lead through
-  track 2 with that preset's settings, so held chords come back in mono
-  playback.
+- **Recorded chords**: the loop records the root only (notes, not
+  sounds), and playback rebuilds the chord from the track's preset:
+  - stereo track 1: a real chord. The root plays on POKEY2 1+2, and
+    `lv_tones` puts the tones on POKEY2 ch3 (only while track 2 is silent)
+    and ch4 (only while no loop drum rings). POLY4B `$0B98` keeps the idle
+    loop-drum block from zeroing that ch4. lv_step runs slot 1 before
+    slot 0 so the tone wins a silent ch3.
+  - mono track 1 and stereo track 2 have no spare channels, so POLY
+    becomes a 1-frame arpeggio (the chiptune fake chord).
+  - mono track 2 replays on the lead, so its chords come back complete.
+  - Loop-voice AUTO arpeggios use the note's own triad (auto3/auto5), not
+    MAJOR.
 - `R` toggles AUTO+POLY on the current preset (kept in `live`, RETURN
   restores).
 

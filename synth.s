@@ -253,6 +253,7 @@ SAUDF3   = SH+4
 SAUDC3   = SH+5
 SAUDF4   = SH+6
 SAUDC4   = SH+7
+POLY4B   = $0B98        ; 1 = a loop chord tone owns POKEY2 ch4 this frame
 NOTE2CNT = $066D        ; +1 per slot-0 (track 1) note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
@@ -1756,9 +1757,11 @@ vbi:
         jsr kb_poll
         jsr loop_step
         jsr synth
+        lda #0
+        sta POLY4B
+        ldx #VBS                ; track 2 first: track 1's chord tone may
+        jsr lv_step             ;  then take its ch3 while it's silent
         ldx #0
-        jsr lv_step
-        ldx #VBS
         jsr lv_step
         jsr drum_step
         jsr pokey_out
@@ -1977,11 +1980,13 @@ drum_one:                       ; X = block, Y = AUDF register offset
 @v:     ora D_CTL,x
         sta SAUDC1,y
         rts
-@off:   cpx #0                  ; idle live block: a chord tone may own ch4
-        bne @o2
+@off:   cpx #0                  ; idle block: a chord tone may own its ch4
+        bne @o0
         lda POLY4
-        bne @o3
-@o2:    lda #0
+        jmp @o1
+@o0:    lda POLY4B
+@o1:    bne @o3
+        lda #0
         sta SAUDC1,y
 @o3:    rts
 
@@ -2459,18 +2464,28 @@ lv_step:                        ; VBI, X = block
 @x:     rts
 @go:    sty VT2                 ; AUDF register offset
         sta VT3                 ; 1 = 16-bit pair
-        lda V_PAR+9,x           ; CHD SPD 0 = POLY: loop voices play the root
-        beq @na
-        lda V_PAR+8,x           ; chord arpeggio
+        lda #0
+        sta VT1                 ; 1 = render a held chord (lv_tones)
+        lda V_PAR+8,x           ; chord
         beq @na
         sta VT0
+        lda V_PAR+9,x           ; CHD SPD; 0 = POLY (held chord)
+        bne @spd
+        lda STEREO              ; stereo track 1: a real chord on POKEY2
+        beq @fast
+        cpx #0
+        bne @fast
+        inc VT1
+        bne @na                 ; the root here, the tones in lv_tones
+@fast:  lda #8                  ; no spare channels: a 1-frame arpeggio
+@spd:   sta VT4
         lda V_ATMR,x
         beq @as
         dec V_ATMR,x
         bne @am
 @as:    lda #9
         sec
-        sbc V_PAR+9,x
+        sbc VT4
         sta V_ATMR,x
         inc V_APOS,x
 @am:    ldy VT0
@@ -2479,10 +2494,23 @@ lv_step:                        ; VBI, X = block
         bcc @ai
         lda #0
         sta V_APOS,x
-@ai:    clc
+@ai:    cpy #CH_AUTO
+        beq @au
+        clc
         adc chord_start,y
         tay
         lda chord_ofs,y
+        jmp @of
+@au:    tay                     ; AUTO: the note's own diatonic triad
+        beq @of
+        sty VT5
+        ldy V_NOTE,x
+        lda notepc,y
+        tay
+        lda auto3,y
+        dec VT5
+        beq @of
+        lda auto5,y
         jmp @of
 @na:    lda #0
 @of:    clc
@@ -2598,9 +2626,80 @@ lv_step:                        ; VBI, X = block
         rts
 @c16:   pla
         sta SAUDC2,y             ; the pair sounds on its high channel
-        rts
+        lda VT1
+        beq @rt
+        jmp lv_tones
+@rt:    rts
 
 .segment "CODE"
+
+; stereo track 1 with a held (POLY) chord: the two chord tones on POKEY2
+; ch3 (only while track 2 is silent) and ch4 (only while no loop drum rings),
+; 8-bit in the track's wave at 3/4 of its envelope. X = 0.
+lv_tones:
+        ldy V_PAR+8
+        cpy #CH_AUTO
+        bne @fix
+        ldy V_NOTE
+        lda notepc,y
+        tay
+        lda auto3,y
+        sta VT0
+        lda auto5,y
+        jmp @t
+@fix:   lda poly1,y
+        sta VT0
+        lda poly2,y
+@t:     sta VT1
+        lda V_VHI
+        lsr a
+        lsr a
+        sta VT4
+        lda V_VHI
+        sec
+        sbc VT4
+        ldy V_PAR
+        ora wavebits,y
+        sta VT4
+        lda V_EST+VBS
+        bne @t2
+        lda VT0
+        jsr lv_pitch
+        sta SAUDF3+P2
+        lda VT4
+        sta SAUDC3+P2
+@t2:    lda VT1
+        cmp #$FF
+        beq @x
+        lda D_TMR+8
+        bne @x
+        lda VT1
+        jsr lv_pitch
+        sta SAUDF4+P2
+        lda VT4
+        sta SAUDC4+P2
+        lda #1
+        sta POLY4B
+@x:     rts
+
+lv_pitch:                       ; A = semitones above track 1's note -> AUDF
+        clc
+        adc V_NOTE
+        cmp #96
+        bcc @k
+        lda #95
+@k:     tay
+        lda V_PAR
+        cmp #1
+        beq @bz
+        cmp #3
+        beq @rs
+        lda lay64,y
+        rts
+@bz:    lda buzz64,y
+        rts
+@rs:    lda rasp64,y
+        rts
 
 ; ---------------------------------------------------------------------------
 synth:

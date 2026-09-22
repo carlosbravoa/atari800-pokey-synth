@@ -114,8 +114,9 @@ def frame(key=None):
     call("kb_poll")
     call("loop_step")
     call("synth")
-    call("lv_step", x=0)
+    mem[L("POLY4B")] = 0
     call("lv_step", x=20)
+    call("lv_step", x=0)
     call("drum_step")
     call("pokey_out")
     return w(L("OUTLO")), mem[L("VOLHI")], mem[L("ESTATE")]
@@ -496,6 +497,42 @@ for pre, name in ((4, "BASS"), (6, "SYNTH")):
                                 f"(bad {bad[:3]}, differ {diff[:3]})")
     for _ in range(40): frame()
 call("select_preset", a=0)
+# recorded held chords (the poly chord problem): stereo = a real chord
+def rec_chord_loop():
+    tap(BK)
+    call("select_preset", a=1)          # ORGAN
+    tap(0x0C)                           # factory
+    tap(0x28)                           # R: AUTO + POLY
+    tap(SP)
+    for _ in range(5): frame()
+    for _ in range(30): frame(A)        # hold C for 30 frames
+    for _ in range(40): frame()
+    tap(SP)
+rec_chord_loop()
+check(mem[L("LSTATE")] == 2 and mem[L("MLANE") + 5] == 37 or any(mem[L("MLANE") + i] == 37 for i in range(10)),
+      "a chord was recorded as its root (C4) on track 1")
+while w(L("LPOSLO")) != 0: frame()
+for _ in range(12): frame()             # the recorded C is sounding
+p2 = mem[0xD210] | mem[0xD212] << 8
+lay = lambda k: mem[L("lay64") + k]
+check(p2 == (mem[L("pure_lo") + 36] | mem[L("pure_hi") + 36] << 8)
+      and mem[0xD214] == lay(40) and mem[0xD216] == lay(43)
+      and mem[0xD213] & 0x0F and mem[0xD215] & 0x0F and mem[0xD217] & 0x0F,
+      f"stereo playback: root C4 on POKEY2 1+2, E4 on ch3, G4 on ch4 (a real C major)")
+tap(BK)
+# mono: no spare channels -> the chord comes back as a 1-frame arpeggio
+mem[L("STEREO")] = 0
+rec_chord_loop()
+while w(L("LPOSLO")) != 0: frame()
+for _ in range(6): frame()
+seen = set()
+for _ in range(9):
+    frame(); seen.add(mem[L("V_IDX")])
+check(seen == {36, 40, 43}, f"mono playback: C major as a fast arpeggio on voice 2 {sorted(seen)}")
+tap(BK)
+tap(0x0C)
+call("select_preset", a=0)
+mem[L("STEREO")] = 1
 # passive fallback: key down but POKEY2's SKSTAT agrees -> mirror -> mono
 mem[0xD21F] = 0x00                     # (in py65 $D20F/$D21F are separate bytes)
 frame(A)
