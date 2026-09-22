@@ -29,7 +29,14 @@ load:
 loops:
 	python3 loopfile.py list
 
+# songs: songs/NAME.song = one "<loop> [repeats]" per line
+song:
+	python3 songfile.py play $(NAME)
+
+pack:
+	python3 songfile.py pack $(NAME)
+
 clean:
 	rm -rf build
 
-.PHONY: all deploy clean save load loops
+.PHONY: all deploy clean save load loops song pack

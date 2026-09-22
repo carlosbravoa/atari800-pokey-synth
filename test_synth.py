@@ -488,6 +488,42 @@ for _ in range(30): frame()
 mem[L("P_CHORD")] = 0
 tap(0x0C)                               # RETURN: factory PIANO
 
+# 14. song mode: queue a second section into bank 1, switch at the seam
+def lanes_of(demo_i):
+    name, S, N, p1, p2, t1, t2, dr = gd.DEMOS[demo_i]
+    L5 = [bytearray(N * S) for _ in range(5)]
+    for lane, tr in ((0, t1), (3, t2)):
+        for t, nn, d in tr:
+            L5[lane][t * S] = nn + 1
+            L5[lane][(t + d) * S - 2] = 0xFE
+    for k, v in enumerate(dr):
+        if v: L5[1][k * S] = v
+    L5[2][0], L5[4][0] = p1, p2
+    return N * S, L5, len(t1), len(t2), sum(1 for v in dr if v)
+tap(BK)
+tap(Q)                                  # GROOVE in bank 0 (the demo loader)
+check(mem[L("LBANK")] == 0, "demo plays from bank 0")
+n2, L5, c1, c2, cd = lanes_of(1)        # TECHNO -> bank 1
+for k, base in enumerate((0x5000, 0x6000, 0x7000, 0x8000, 0x9000)):
+    for i, v in enumerate(L5[k]): mem[base + 0x800 + i] = v
+mem[L("NEXTLEN")], mem[L("NEXTLEN") + 1] = n2 & 255, n2 >> 8
+mem[L("NEXTT1")] = 1
+sc0 = mem[L("SECTCNT")]
+mem[L("NEXTREQ")] = 1
+while mem[L("SECTCNT")] == sc0: frame(); main_frame()
+check(mem[L("LBANK")] == 8 and w(L("LLENLO")) == n2 and w(L("LPOSLO")) == 0
+      and mem[L("NEXTREQ")] == 0, "at the seam: bank 1, TECHNO's length, from frame 0")
+cn = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "DRUMCNT")]
+for _ in range(n2): frame(); main_frame()
+got = [(mem[L(x)] - cn[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "DRUMCNT"))]
+check(got == [c1, c2, cd], f"bank 1 pass plays TECHNO {got} (want {[c1, c2, cd]})")
+mem[L("NEXTREQ")] = 2
+sc0 = mem[L("SECTCNT")]
+while mem[L("SECTCNT")] == sc0: frame(); main_frame()
+check(mem[L("LSTATE")] == 4 and w(L("LPOSLO")) == 0, "NEXTREQ 2 stops the song at the seam")
+tap(BK)
+check(mem[L("LBANK")] == 0 and mem[L("NEXTREQ")] == 0, "clear resets to bank 0")
+
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):
     call("select_preset", a=p)

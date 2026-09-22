@@ -1,0 +1,7 @@
+# POKEY SYNTH example song: the built-in demos as sections
+# one section per line: <loop name in loops/> [repeats]
+groove 2
+techno 2
+chiptune 2
+rock 2
+groove 1

@@ -250,6 +250,12 @@ NOTE3CNT = $0672        ; +1 per slot-1 (track 2, stereo) note-on
 STEREO   = $0673        ; 1 = a second POKEY answers at $D210 (auto-detected)
 LASTSTE  = $0674        ; main: title as drawn
 POLY4    = $0675        ; 1 = a held chord tone owns POKEY1 ch4 this frame
+; song mode (driven by the PC's songfile.py): two lane banks of 2048 frames
+LBANK    = $0676        ; $00 / $08: hi-byte offset of the playing bank
+NEXTREQ  = $0677        ; PC -> VBI at the next wrap: 1 switch bank, 2 stop
+NEXTLEN  = $0678        ; 2 bytes: the other bank's section length
+NEXTT1   = $067A        ; ... and its T1USED
+SECTCNT  = $067B        ; +1 per section switch / song end (last page-6 byte)
 CH_AUTO  = 7            ; CHORD value: diatonic auto-chord (C major)
 K_R      = $28          ; toggles AUTO held chords on the current preset
 P2       = $10          ; POKEY2 register offset from POKEY1
@@ -2142,8 +2148,34 @@ lp_play:
         lda LPOSHI
         cmp LLENHI
         bne @x
-        jmp lp_rewind
+        jmp lp_wrap
 @x:     rts
+
+lp_wrap:                        ; end of a pass: song mode may switch sections
+        lda NEXTREQ
+        beq lp_rewind
+        cmp #2
+        beq @stop
+        lda LBANK
+        eor #$08
+        sta LBANK
+        lda NEXTLEN
+        sta LLENLO
+        lda NEXTLEN+1
+        sta LLENHI
+        lda NEXTT1
+        sta T1USED
+        lda #0
+        sta NEXTREQ
+        inc SECTCNT
+        jmp lp_rewind
+@stop:  lda #0                  ; song over: stop at the seam
+        sta NEXTREQ
+        inc SECTCNT
+        lda #LS_STOP
+        sta LSTATE
+        jsr lp_rewind
+        jmp lp_hush
 
 lp_rewind:
         lda #0
@@ -2155,11 +2187,12 @@ lp_rewind:
         inc LOOPCNT
         rts
 
-lp_ptr: clc                     ; VP = MLANE + LPOS
+lp_ptr: clc                     ; VP = MLANE + bank + LPOS
         lda LPOSLO
         sta VP
         lda LPOSHI
         adc #>MLANE
+        adc LBANK
         sta VP+1
         rts
 
@@ -2203,8 +2236,10 @@ lp_close:                       ; end the first recording: LLEN = LPOS
         rts
 
 lp_empty:
-        lda #LS_EMPTY
+        lda #LS_EMPTY           ; (= 0)
         sta LSTATE
+        sta LBANK               ; back to bank 0, no pending section
+        sta NEXTREQ
 lp_hush:
         lda #0
         sta LCELL
@@ -2254,6 +2289,7 @@ loop_cmd:                       ; A = command
         jsr lp_rewind
         lda #0
         sta LOOPCNT
+        sta LBANK               ; a fresh recording lives in bank 0
         sta T1USED
         sta V2EST
         sta V2VHI

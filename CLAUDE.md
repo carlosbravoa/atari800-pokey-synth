@@ -102,6 +102,43 @@ python3 loopfile.py list        #     make loops
   lanes, edit restored, same per-pass playback, and EMPTY refused. It sets
   EDSEL itself, since the editor selection persists across sessions.
 
+## Songs (PC-streamed sections, gapless)
+
+```bash
+cat songs/mysong.song      # one section per line: <loop name> [repeats]
+  intro 1
+  verse 4
+  chorus 2
+python3 songfile.py play mysong [--loop]   # or: make song NAME=mysong
+python3 songfile.py pack mysong            # -> songs/mysong.pss (self-contained)
+python3 songfile.py info mysong
+```
+
+- Sections are loop files (`loopfile.py save NAME`), each **<= 2048 frames
+  (~34 s)**. Record a section, save it, repeat, then list them in a .song.
+  A .pss packs the .song and its loops into one file. `play` uses the .pss
+  when no .song of that name exists.
+- **Atari side** (~50 bytes): the lanes split into two banks. `lp_ptr` adds
+  LBANK (`$0676`, hi-byte offset `$00`/`$08`, so bank 1 is lane + `$800`).
+  At each seam, `lp_wrap` checks NEXTREQ (`$0677`). 1 means flip LBANK,
+  take NEXTLEN (`$0678`) and NEXTT1 (`$067A`), and bump SECTCNT (`$067B`).
+  2 means stop at the seam (song end). The switch happens inside the VBI on
+  the exact wrap frame, so it's gapless by construction. Clear/EMPTY and a
+  fresh REC reset to bank 0, so plain loops, demos and `loopfile.py load`
+  are unchanged.
+- **PC side** (`songfile.py`): starts section 1 in bank 0 with the demo
+  sequence. While a section plays, it writes the next section into the
+  other bank. When the Atari's LOOPCNT shows the section's last repeat has
+  begun, it arms NEXTREQ, then waits for SECTCNT. If a load ever overruns a
+  short section, it reports "late" and the section repeats once more,
+  audibly but safely. Presets come from the first section's file. Ctrl-C
+  stops immediately (TAB).
+- `hwsong.py`: two demos saved as loops, song "GROOVE x2, TECHNO, GROOVE"
+  from .song and from the packed .pss. It checks bank and length at each
+  switch, passes per section `[2, 1, 1]` via LOOPCNT, and seam-to-seam
+  gaps on the Atari clock. Read RTCLOK hi/lo in one peek: two single-byte
+  peeks tear across the low-byte wrap (a phantom 256-frame gap).
+
 ## Chords (polyphony without two keys)
 
 - CHORD values: OFF MAJOR MINOR 7TH OCTAVE POWER DIM **AUTO**. AUTO is
@@ -168,8 +205,8 @@ python3 loopfile.py list        #     make loops
   between loop wraps (`aligned()`), not over wall-clock windows.
 - VBI order: kb_poll -> loop_step -> synth (lead + layer) -> v2_step -> drum_step.
 - **Code budget**: two load segments. MAIN `$2000-$3BFF` holds code +
-  RODATA, ending ~$3B7E (**~130 bytes free**; the next feature must first
-  move code into HIDATA, since code runs from any segment). HIDATA `$4400-$4FFF` holds the pitch
+  RODATA, ending ~$3BCB (**~50 bytes free**; the next Atari-side feature
+  must first move code into HIDATA, since code runs from any segment). HIDATA `$4400-$4FFF` holds the pitch
   tables and demos, ending ~$4A43 (~1.5 KB free). Don't use `$A000+`: BASIC
   is still mapped when USR-launched from READY.
 
@@ -242,7 +279,9 @@ $064B/4C LPOS  $064D/4E LLEN  $064F LCELL (bar 0-16)
 $0652-54 LIVEM/LIVED/LIVEP  $0655 PRESREQ  $0658 LOOPCNT (+1 per wrap)
 $066D NOTE2CNT (+1 per track-1 note)  $066E T1USED  $066F DEMOIDX
 $0671 MUTEMEL  $0672 NOTE3CNT (+1 per track-2 note in stereo)
-$0673 STEREO (1 = second POKEY detected)
+$0673 STEREO (1 = second POKEY detected)  $0675 POLY4
+$0676 LBANK  $0677 NEXTREQ  $0678/79 NEXTLEN  $067A NEXTT1  $067B SECTCNT
+  (song mode; page 6 is now full up to the trampoline at $067C)
 (voice/drum engine state moved to $0B40-$0B77; $065x/$0661 are free)
 $0A40-$0B3F key logger: 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C),
   written by wait_frame on every raw register change (sk $08 = key down,
