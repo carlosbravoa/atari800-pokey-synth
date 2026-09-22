@@ -11,6 +11,10 @@ What it has to decide, and how:
     time: the lead keeps the top note of a chord, the bass the bottom, the
     harmony the second from the top. Overlapping notes interrupt (legato),
     which is what makes bounce figures survive.
+  * With no --lead/--bass, parts are picked automatically from the file's
+    own channel statistics, and every conversion prints a coverage map
+    (which tenth of the song each part plays) with a warning when a part
+    is mostly silent - that is what catches a wrong track choice.
   * Parts are picked as track or track:channel (both 1-based), which is
     what type-0 files need: everything is in one track there.
   * Several MIDI parts can feed one part: earlier ones mask later ones
@@ -128,6 +132,117 @@ def part(mid, tracks, prefer, second=False):
     return m2p.mono_events(rest, prefer=prefer) if rest else []
 
 
+def channel_stats(mid, start=0.0, end=0.0):
+    """[(spec, notes, mean pitch, first, last, is_drum)] per track/channel,
+    counted only inside the window that is actually being converted"""
+    out = []
+    for i in range(len(mid.tracks)):
+        per = {}
+        for n, c, s0, s1 in raw_notes(mid, i):
+            if end and s0 >= end:
+                continue
+            if start and s1 <= start:
+                continue
+            per.setdefault(c, []).append((n, s0, s1))
+        for c, ns in per.items():
+            out.append((f"{i + 1}:{c + 1}", len(ns),
+                        sum(n for n, _, _ in ns) / len(ns),
+                        min(s for _, s, _ in ns), max(e for _, _, e in ns),
+                        c == DRUM_CH))
+    return out
+
+
+def auto_pick(mid, start=0.0, end=0.0):
+    """Pick lead / bass / harmony / drums from the file itself.
+
+    Each role wants a register AND a part that actually plays: a sparse
+    8-note line in the cellar is not the bass, and the highest sparkle is
+    not the tune. Roles are then filled out with other parts in the same
+    register that cover the stretches the first one is silent for, because
+    arrangements hand a part between instruments.
+    """
+    st = channel_stats(mid, start, end)
+    drums = [x[0] for x in st if x[5]]
+    mel = [x for x in st if not x[5] and x[1] >= 8]
+    if not mel:
+        return "", "", "", ",".join(drums)
+    span = max(x[4] for x in mel) - min(x[3] for x in mel) or 1
+
+    def cover(x):
+        return (x[4] - x[3]) / span
+
+    def pick(pool, centre, low=False):
+        def score(x):
+            reg = max(0, x[2] - centre) / 6 if low else abs(x[2] - centre) / 8
+            return cover(x) * 4 + x[1] / 150 - reg
+        return max(pool, key=score) if pool else None
+
+    lead = pick(mel, 72)
+    rest = [x for x in mel if x is not lead]
+    bass = pick(rest, 45, low=True)
+    rest = [x for x in rest if x is not bass]
+    harm = pick(rest, 64)
+
+    def relay(seed, pool):
+        chosen = [seed]
+        for c in sorted(pool, key=lambda x: -x[1]):
+            if abs(c[2] - seed[2]) > 8:
+                continue
+            overlap = any(min(c[4], x[4]) - max(c[3], x[3]) > 0.5 * (c[4] - c[3])
+                          for x in chosen)
+            if not overlap:
+                chosen.append(c)
+        return chosen
+
+    used = {x[0] for x in (lead, bass, harm) if x}
+    free = lambda: [x for x in mel if x[0] not in used]
+    leads = relay(lead, free()) if lead else []
+    used |= {x[0] for x in leads}
+    basses = relay(bass, free()) if bass else []
+    used |= {x[0] for x in basses}
+    harms = relay(harm, free()) if harm else []
+    print("auto-picked parts (override with --lead/--bass/--harm/--drums):")
+    for nm, xs in (("lead", leads), ("bass", basses), ("harmony", harms)):
+        for k, x in enumerate(xs):
+            print(f"  {(nm if k == 0 else ' + also'):8s} {x[0]:6s} {x[1]:4d} notes, "
+                  f"mean midi {x[2]:.0f}, {x[3]:.0f}-{x[4]:.0f}s")
+    if drums:
+        print(f"  drums    {','.join(drums)}")
+    j = lambda xs: ",".join(x[0] for x in xs)
+    return j(leads), j(basses), j(harms), ",".join(drums)
+
+
+def coverage_check(parts, drums, length):
+    """the heuristic that catches a wrong track choice: how much of the
+    song each part actually plays, and where the long silences are"""
+    print("coverage (bars of 10% of the song, # = playing):")
+    bad = []
+    for name in ("lead", "bass", "harm"):
+        ev = parts[name]
+        if not ev:
+            print(f"  {name:5s} -  (not used)")
+            continue
+        bins = [0] * 10
+        for _, s0, s1 in ev:
+            for b in range(10):
+                if s0 < length * (b + 1) / 10 and s1 > length * b / 10:
+                    bins[b] += 1
+        bar = "".join("#" if b else "." for b in bins)
+        pct = sum(1 for b in bins if b) * 10
+        print(f"  {name:5s} {bar}  {pct}% of the song, {len(ev)} notes")
+        if pct < 60:
+            bad.append(f"{name} plays in only {pct}% of the song")
+        elif not bins[0]:
+            silent = next(i for i, b in enumerate(bins) if b) * 10
+            bad.append(f"{name} is silent for the first {silent}% "
+                       f"({silent * length / 100:.0f}s)")
+    if drums:
+        print(f"  drums {'#' * 10}  {len(drums)} hits")
+    for w in bad:
+        print(f"  ! {w} - check the track choice (--inspect)")
+    return bad
+
+
 def fit_range(events, name, transpose=0):
     """transpose by octaves until it fits; report what still doesn't"""
     if not events:
@@ -167,7 +282,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("midi")
     ap.add_argument("-o", "--out")
-    ap.add_argument("--inspect", action="store_true")
+    ap.add_argument("--inspect", action="store_true",
+                    help="list tracks and channels, then stop")
     ap.add_argument("--lead", default="",
                     help="parts for the lead: track or track:channel, 1-based, "
                          "comma separated (earlier ones mask later ones)")
@@ -187,11 +303,13 @@ def main():
     a = ap.parse_args()
 
     mid = mido.MidiFile(a.midi)
-    if a.inspect or not (a.lead or a.bass):
+    if a.inspect:
         inspect(mid)
-        if not a.inspect:
-            print("\npick parts with --lead/--bass[/--harm/--drums] (1-based track numbers)")
         return
+    if not (a.lead or a.bass):                 # nothing chosen: choose for them
+        a.lead, a.bass, a.harm, a.drums = auto_pick(mid, a.start, a.end)
+        if not a.lead:
+            sys.exit("no melodic parts found; use --inspect and pick by hand")
 
     nums = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     parts = {}
@@ -213,6 +331,7 @@ def main():
 
     for k in parts:
         parts[k], _ = fit_range(parts[k], k, a.transpose)
+    coverage_check(parts, drums, (a.end or mid.length) - a.start)
 
     stereo = bool(parts["harm"])
     title = a.title or os.path.basename(a.midi).rsplit(".", 1)[0]

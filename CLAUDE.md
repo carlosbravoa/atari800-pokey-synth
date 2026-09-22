@@ -159,6 +159,18 @@ python3 midi2psq.py song.mid --lead 1,5 --bass 3,4 --harm 2,6 --drums 7,8,9,10 \
 python3 pcplay.py songs/kalinka.psq
 ```
 
+- **With no `--lead`/`--bass` it picks the parts itself** from the file's
+  channel statistics: each role wants a register *and* a part that plays
+  (`auto_pick`: lead near midi 72, bass low, harmony mid, all weighted by
+  coverage and note count), then `relay` adds same-register parts that
+  cover the stretches the first one is silent for (arrangements hand a
+  part between instruments: Kalinka's Square Bass -> Synth Bass).
+- **Every conversion prints a coverage map** (which tenth of the song each
+  part plays) and warns when a part is mostly silent or starts late. That
+  is what catches a wrong track choice *before* you listen — the first
+  Kalinka conversion had the melody in the harmony voice because the track
+  numbers were off by one (the older `midi2pokey.py --inspect` counts
+  tracks from 0, this one from 1).
 - Parts are `track` or `track:channel`, both 1-based. Type-0 files keep
   everything in one track, so channels are how you pick parts there; the
   inspector prints a ready-made `--lead N:C` for each channel.
