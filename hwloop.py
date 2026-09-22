@@ -5,7 +5,7 @@ import sys, time
 sys.path.insert(0, "/home/carlos/devel/fpga/atari800_tang_nano20k_parallel/tools")
 from atari_link import AtariLink
 
-SPACE, TAB, BKSP, A, C, V, ESC = 0x2C, 0x2B, 0x2A, 0x04, 0x06, 0x19, 0x29
+SPACE, TAB, BKSP, A, C, V, ESC, K = 0x2C, 0x2B, 0x2A, 0x04, 0x06, 0x19, 0x29, 0x0E
 ok = True
 
 
@@ -16,9 +16,21 @@ def check(c, msg):
 
 
 def st(l):
-    b = l.peek(0x0600, 0x59)
+    b = l.peek(0x0600, 0x70)
     return dict(ls=b[0x49], pos=b[0x4B] | b[0x4C] << 8, len=b[0x4D] | b[0x4E] << 8,
-                notes=b[0x23], drums=b[0x24], loops=b[0x58], cell=b[0x4F])
+                notes=b[0x6D], lead=b[0x23], drums=b[0x24], loops=b[0x58],
+                cell=b[0x4F])
+
+
+def aligned(l, passes):
+    """snapshots taken just after a wrap, `passes` wraps apart"""
+    c = st(l)['loops']
+    while st(l)['loops'] == c:
+        pass
+    a = st(l)
+    while (st(l)['loops'] - a['loops']) & 255 < passes:
+        pass
+    return a, st(l)
 
 
 def tap(l, k, wait=0.35):
@@ -47,7 +59,7 @@ with AtariLink() as l:
     check(len(on) == 1 and ml[on[0]] == 37 and off and 18 <= off[0] - on[0] <= 30,
           f"lanes: note C4 on@{on} off@{off} ({(off[0]-on[0]) if off else '?'} frames)")
     check(len(kk) == 1 and dl[kk[0]] == 1 and pl[0] == 1, f"kick@{kk}, preset PIANO@0")
-    a = st(l); time.sleep(L / 60 * 3 + 0.2); b = st(l)
+    a, b = aligned(l, 3)
     loops = (b['loops'] - a['loops']) & 255
     check(loops >= 3 and (b['notes'] - a['notes']) & 255 == loops
           and (b['drums'] - a['drums']) & 255 == loops,
@@ -56,17 +68,25 @@ with AtariLink() as l:
     tap(l, SPACE, 0.2)
     check(st(l)['ls'] == 3, "SPACE -> DUB")
     tap(l, V, 0.2)
+    l.key(K, hold_ms=250); time.sleep(0.5)
     time.sleep(L / 60)
     tap(l, SPACE, 0.2)
+    m2 = l.peek(0x8000, L)
+    on2 = [(i, v) for i, v in enumerate(m2) if v]
+    check(any(v == 49 for _, v in on2) and any(v == 0xFE for _, v in on2),
+          f"overdubbed C5 in track 2 {on2}")
     check(st(l)['ls'] == 2, "SPACE -> PLAY")
     dl = l.peek(0x6000, L)
     hits = sorted((i, v) for i, v in enumerate(dl) if v)
     check([v for _, v in hits].count(2) >= 1 and [v for _, v in hits].count(1) == 1,
           f"drum lane after overdub {hits}")
-    a = st(l); time.sleep(L / 60 * 2 + 0.2); b = st(l)
+    a, b = aligned(l, 2)
     loops = (b['loops'] - a['loops']) & 255
     check((b['drums'] - a['drums']) & 255 == loops * len(hits),
           f"{loops} passes x {len(hits)} drums = {(b['drums']-a['drums'])&255} hits")
+    check((b['lead'] - a['lead']) & 255 == loops and (b['notes'] - a['notes']) & 255 == loops,
+          f"{loops} passes: track 1 on voice 2 x{(b['notes']-a['notes'])&255}, "
+          f"track 2 on lead x{(b['lead']-a['lead'])&255}")
     tap(l, TAB, 0.3)
     a = st(l); time.sleep(L / 60 + 0.3); b = st(l)
     check(a['ls'] == 4 and b['drums'] == a['drums'] and b['notes'] == a['notes'],

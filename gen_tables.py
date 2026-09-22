@@ -64,6 +64,27 @@ for nm, per in (("pure", 2), ("buzz", 15), ("rasp", 31)):
     L += rows(f"{nm}_lo", [x & 255 for x in v])
     L += rows(f"{nm}_hi", [x >> 8 for x in v])
 L += rows("lay64", [layer(n) for n in range(96)])
+
+
+def v2(n, per):
+    """8-bit @64 kHz for voice 2: f = F64/(per*(AUDF+1)), AUDF+1 coprime to
+    the poly period; folded up an octave while it doesn't fit."""
+    m = n
+    while True:
+        x = F64 / (per * freq(m))
+        k = round(x)
+        best = None
+        for c in (k, k - 1, k + 1, k - 2, k + 2):
+            if c >= 2 and gcd(c, per) == 1:
+                if best is None or abs(c - x) < abs(best - x):
+                    best = c
+        if best - 1 <= 255:
+            return max(1, best - 1)
+        m += 12
+
+
+L += rows("buzz64", [v2(n, 15) for n in range(96)])
+L += rows("rasp64", [v2(n, 31) for n in range(96)])
 for nm, t in (("atk", ATK), ("dec", DEC)):
     v = [rate(x) for x in t]
     L += rows(f"{nm}_lo", [x & 255 for x in v])

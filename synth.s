@@ -198,10 +198,12 @@ LOGBUF   = $0A40        ; 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C)
 ZWF      = $8C          ; wait_frame: frame to wait past
 
 ; ---- looper: per-frame lanes, one byte per frame, up to 4096 frames ----
-MLANE    = $5000        ; melody: 0 none, 1-96 note-on (n+1), $FE note-off
+MLANE    = $5000        ; track 1 melody: 0 none, 1-96 note-on (n+1), $FE off
 DLANE    = $6000        ; drums:  0 none, 1-8 drum (d+1)
-PLANE    = $7000        ; preset: 0 none, 1-10 preset (p+1)
-LANEPGS  = $30          ; 12 KB cleared at record start
+PLANE    = $7000        ; track 1 preset: 0 none, 1-10 preset (p+1)
+M2LANE   = $8000        ; track 2 melody (overdub), same codes as MLANE
+P2LANE   = $9000        ; track 2 preset
+LANEPGS  = $50          ; 20 KB cleared at record start
 MAXLOOP  = $10          ; hi byte of the 4096-frame cap
 LSTATE   = $0649        ; 0 empty 1 rec 2 play 3 dub (play+record drums) 4 stop
 LCMD     = $064A        ; main -> VBI: 1 SPACE 2 TAB 3 clear 4 stop
@@ -219,6 +221,18 @@ PRESREQ  = $0655        ; VBI -> main: playback wants preset ($FF none)
 LASTLS   = $0656        ; main: loop state as drawn
 LASTCELL = $0657
 LOOPCNT  = $0658        ; +1 per loop wrap (liveness)
+; voice 2 (ch3): plays track 1 while the loop runs
+V2PRE    = $0659        ; preset of track 1's sound
+V2NOTE   = $065A
+V2EST    = $065B        ; envelope state (as ESTATE)
+V2VLO    = $065C
+V2VHI    = $065D
+V2APOS   = $065E
+V2ATMR   = $065F
+V2IDX    = $0660        ; note incl. chord
+V2PAR    = $0661        ; 12 bytes: track 1 preset params (copied from live)
+NOTE2CNT = $066D        ; +1 per voice-2 note-on
+T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 LS_EMPTY = 0
 LS_REC   = 1
 LS_PLAY  = 2
@@ -1376,6 +1390,7 @@ vbi:
         jsr kb_poll
         jsr loop_step
         jsr synth
+        jsr v2_step
         jsr drum_step
         jmp XITVBV
 
@@ -1598,7 +1613,9 @@ lp_rec: jsr lp_ptr
         ldy #0
         lda LIVEM
         sta (VP),y
-        jsr lp_next
+        beq @nm
+        sta T1USED
+@nm:    jsr lp_next
         lda LIVED
         sta (VP),y
         jsr lp_next
@@ -1618,15 +1635,15 @@ lp_rec: jsr lp_ptr
 lp_play:
         jsr lp_ptr
         ldy #0
-        lda (VP),y              ; melody
+        lda (VP),y              ; track 1 melody -> voice 2
         beq @d
         cmp #$FE
         beq @off
         sec
         sbc #1
-        jsr note_play
+        jsr v2_on
         jmp @d
-@off:   jsr note_stop
+@off:   jsr v2_off
 @d:     jsr lp_ptr
         jsr lp_next
         ldy #0
@@ -1645,11 +1662,43 @@ lp_play:
         bne @p
         sta (VP),y              ; overdub: stamp the live hit into the lane
 @p:     jsr lp_next
-        lda (VP),y              ; preset
+        lda (VP),y              ; track 1 preset -> voice 2's sound
+        beq @t2
+        sec
+        sbc #1
+        jsr v2_load
+@t2:    jsr lp_next             ; track 2 melody -> lead (a live note wins)
+        ldy #0
+        lda LIVEM
+        bne @m2dub
+        lda (VP),y
+        beq @q2
+        cmp #$FE
+        beq @m2off
+        sec
+        sbc #1
+        jsr note_play
+        jmp @q2
+@m2off: jsr note_stop
+        jmp @q2
+@m2dub: ldx LSTATE              ; overdub: stamp the live note event
+        cpx #LS_DUB
+        bne @q2
+        sta (VP),y
+@q2:    jsr lp_next             ; track 2 preset -> the lead
+        ldy #0
+        lda LIVEP
+        bne @q2dub
+        lda (VP),y
         beq @adv
         sec
         sbc #1
         sta PRESREQ
+        jmp @adv
+@q2dub: ldx LSTATE
+        cpx #LS_DUB
+        bne @adv
+        sta (VP),y
 @adv:   jsr lp_clear
         clc                     ; progress: +16/frame vs LLEN (Bresenham)
         lda LACCLO
@@ -1742,6 +1791,8 @@ lp_empty:
 lp_hush:
         lda #0
         sta LCELL
+        sta V2EST
+        sta V2VHI
         lda GATE
         bne @x
         lda ESTATE
@@ -1749,6 +1800,13 @@ lp_hush:
         lda #4
         sta ESTATE
 @x:     rts
+
+lp_dub: ldx PRESET              ; track 2 starts in the current sound
+        inx
+        stx LIVEP
+        lda #LS_DUB
+        sta LSTATE
+        rts
 
 loop_cmd:                       ; A = command
         cmp #1
@@ -1759,6 +1817,9 @@ loop_cmd:                       ; A = command
         jsr lp_rewind
         lda #0
         sta LOOPCNT
+        sta T1USED
+        sta V2EST
+        sta V2VHI
         ldx PRESET              ; the loop starts in the current sound
         inx
         stx LIVEP
@@ -1770,18 +1831,14 @@ loop_cmd:                       ; A = command
         jmp lp_close
 @s2:    cpx #LS_PLAY
         bne @s3
-        lda #LS_DUB
-        sta LSTATE
-        rts
+        jmp lp_dub
 @s3:    cpx #LS_DUB
         bne @s4
         lda #LS_PLAY
         sta LSTATE
         rts
 @s4:    jsr lp_rewind           ; STOP: overdub from the top
-        lda #LS_DUB
-        sta LSTATE
-        rts
+        jmp lp_dub
 @tab:   cmp #2
         bne @clr
         ldx LSTATE              ; TAB: play / stop
@@ -1816,6 +1873,159 @@ loop_cmd:                       ; A = command
         bne @tx
 @st:    lda #LS_STOP
         sta LSTATE
+        rts
+
+; ---- voice 2: track 1 on ch3 (8-bit @64 kHz): wave, ADSR, chord ----
+v2_load:                        ; A = preset: copy its live params
+        sta V2PRE
+        tax
+        lda pbase,x
+        tax
+        ldy #0
+@c:     lda live,x
+        sta V2PAR,y
+        inx
+        iny
+        cpy #NPARAM
+        bne @c
+        rts
+
+v2_on:                          ; A = note 0-95
+        sta V2NOTE
+        inc NOTE2CNT
+        lda #1
+        sta V2EST
+        sta V2ATMR
+        lda #$FF
+        sta V2APOS
+        rts
+
+v2_off:
+        lda V2EST
+        beq @x
+        lda #4
+        sta V2EST
+@x:     rts
+
+v2_owns:                        ; Z clear (bne) when voice 2 owns ch3
+        lda T1USED
+        beq @no
+        lda LSTATE
+        cmp #LS_PLAY
+        beq @yes
+        cmp #LS_DUB
+        beq @yes
+@no:    lda #0
+        rts
+@yes:   lda #1
+        rts
+
+v2_step:
+        jsr v2_owns
+        bne @own
+        rts
+@own:   ldx V2PAR+8             ; chord
+        beq @na
+        lda V2ATMR
+        beq @as
+        dec V2ATMR
+        bne @am
+@as:    lda #9
+        sec
+        sbc V2PAR+9
+        sta V2ATMR
+        inc V2APOS
+@am:    lda V2APOS
+        cmp chord_len,x
+        bcc @ai
+        lda #0
+        sta V2APOS
+@ai:    clc
+        adc chord_start,x
+        tay
+        lda chord_ofs,y
+        jmp @of
+@na:    lda #0
+@of:    clc
+        adc V2NOTE
+        cmp #96
+        bcc @nk
+        lda #95
+@nk:    sta V2IDX
+        tax
+        lda V2PAR               ; wave -> pitch table
+        cmp #1
+        beq @bz
+        cmp #3
+        beq @rs
+        lda lay64,x
+        jmp @pf
+@bz:    lda buzz64,x
+        jmp @pf
+@rs:    lda rasp64,x
+@pf:    sta AUDF3
+        ; ADSR (same shape as the lead's, on V2PAR)
+        lda V2EST
+        bne @ev
+        jmp @vo
+@ev:    cmp #1
+        bne @e2
+        ldx V2PAR+1
+        clc
+        lda V2VLO
+        adc atk_lo,x
+        sta V2VLO
+        lda V2VHI
+        adc atk_hi,x
+        sta V2VHI
+        cmp #15
+        bcc @vo
+        lda #15
+        sta V2VHI
+        lda #0
+        sta V2VLO
+        lda #2
+        sta V2EST
+        bne @vo
+@e2:    cmp #2
+        bne @e3
+        ldx V2PAR+2
+        sec
+        lda V2VLO
+        sbc dec_lo,x
+        sta V2VLO
+        lda V2VHI
+        sbc dec_hi,x
+        sta V2VHI
+        bcc @ts
+        cmp V2PAR+3
+        bcs @vo
+@ts:    lda #3
+        sta V2EST
+@e3:    cmp #3
+        bne @e4
+        lda V2PAR+3
+        sta V2VHI
+        lda #0
+        sta V2VLO
+        beq @vo
+@e4:    ldx V2PAR+4
+        sec
+        lda V2VLO
+        sbc dec_lo,x
+        sta V2VLO
+        lda V2VHI
+        sbc dec_hi,x
+        sta V2VHI
+        bcs @vo
+        lda #0
+        sta V2VHI
+        sta V2VLO
+        sta V2EST
+@vo:    ldx V2PAR
+        lda V2VHI
+        ora wavebits,x
+        sta AUDC3
         rts
 
 ; ---------------------------------------------------------------------------
@@ -2142,7 +2352,10 @@ synth:
         txa
         and #31
         sta ECHOPOS
-        ldx P_LAYER
+        jsr v2_owns             ; loop's track 1 has ch3
+        beq @lyr
+        rts
+@lyr:   ldx P_LAYER
         beq @loff
         cpx #5
         beq @echo

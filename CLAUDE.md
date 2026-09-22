@@ -34,7 +34,7 @@ The first key() of a link session is often lost; send a throwaway first.
 | `RETURN` | restore the current preset's factory sound |
 | `ESC` | silence |
 | OPTION / SELECT (F8/F7) | next / previous preset |
-| `SPACE` | looper: record -> close loop (plays) -> overdub drums <-> play |
+| `SPACE` | looper: record -> close loop (plays) -> overdub (drums + melody) <-> play |
 | `TAB` | looper: stop / play from the top |
 | `BACKSPACE` | looper: clear |
 
@@ -68,11 +68,24 @@ Edits are kept per preset (the `live` table) until RETURN.
 
 ## Looper
 
-- **Per-frame lanes**, one byte per frame, max 4096 frames (~68 s):
-  MLANE `$5000` (0 none, 1-96 note-on n+1, `$FE` note-off), DLANE `$6000`
-  (drum d+1), PLANE `$7000` (preset p+1; frame 0 = the loop's starting
-  sound). Overdubbing drums just stamps DLANE at LPOS, so nothing needs
-  merging. The second-voice melody overdub (next phase) can use the same shape.
+- **Per-frame lanes**, one byte per frame, max 4096 frames (~68 s), in
+  this order (`lp_next` steps +$1000): MLANE `$5000` track 1 melody (0
+  none, 1-96 note-on n+1, `$FE` note-off), DLANE `$6000` drums (d+1),
+  PLANE `$7000` track 1 preset (p+1; frame 0 = the starting sound), M2LANE
+  `$8000` track 2 melody, P2LANE `$9000` track 2 preset. Overdub stamps
+  nonzero live events into the lanes at LPOS, so nothing needs merging.
+  Passes accumulate.
+- **Two melodic voices during playback.** Track 1, the first recording,
+  plays on **voice 2**: ch3 8-bit @64 kHz using its recorded preset's WAVE,
+  ADSR and CHORD. There is no vibrato, sweep, glide or layer. Pitch tables
+  are lay64 for pure (folded up below B2), and buzz64/rasp64 (poly-period
+  corrected, fine for basslines). Track 2, the overdub, plays on the lead,
+  and its presets reach the main thread via PRESREQ. Live playing is on the
+  lead too, and a live event wins its frame over track 2.
+- Voice 2 owns ch3 only while the loop plays AND track 1 has melody
+  (`v2_owns`: T1USED and PLAY/DUB). Otherwise the lead's layer
+  (sub/fifth/oct/chorus/echo) keeps ch3, so drum-only loops keep it.
+- The dual POKEY (below) is the path to a full-quality voice 2.
 - States (LSTATE): EMPTY -> SPACE -> REC -> SPACE -> PLAY <-> SPACE <-> DUB;
   TAB = STOP/PLAY; BKSP = EMPTY; ESC also stops. A loop under 30 frames
   cancels. The 4096 cap auto-closes it. A key held at close gets a note-off
@@ -85,11 +98,16 @@ Edits are kept per preset (the `live` table) until RETURN.
   playback a live drum hit wins its frame. A held live key keeps its note
   over loop note-offs. Playback preset changes go to the main thread
   (`PRESREQ`) and keep the player's octave.
-- VBI order: kb_poll -> loop_step -> synth -> drum_step.
 - **ZP exception**: the VBI uses `$F0-$F1` (`VP`) as its lane pointer, the
   same documented exception as the tetris music engine.
 - `hwloop.py` runs the full record/replay/overdub/stop/clear cycle with real
-  HID keys and checks lanes and counters.
+  HID keys and checks lanes and counters. Per-pass counts are measured
+  between loop wraps (`aligned()`), not over wall-clock windows.
+- VBI order: kb_poll -> loop_step -> synth (lead + layer) -> v2_step -> drum_step.
+- **Code budget**: MAIN ends at ~$3A55 against the $3BFF cap (~420 bytes
+  left). The next feature should move the pitch tables to a second load
+  segment (e.g. `$A000`, free since BASIC is off during `run` boots — but
+  NOT when USR-launched from READY; use `$4400-$4FFF` instead).
 
 ## Later: dual POKEY
 
@@ -124,6 +142,8 @@ $0645 LOGPOS  $0646 LOGN  $0647 LASTKB  $0648 LASTSK
 $0649 LSTATE 0 empty 1 rec 2 play 3 dub 4 stop  $064A LCMD
 $064B/4C LPOS  $064D/4E LLEN  $064F LCELL (bar 0-16)
 $0652-54 LIVEM/LIVED/LIVEP  $0655 PRESREQ  $0658 LOOPCNT (+1 per wrap)
+$0659 V2PRE  $065A V2NOTE  $065B V2EST  $065D V2VHI  $0660 V2IDX
+$0661-6C V2PAR  $066D NOTE2CNT (+1 per voice-2 note)  $066E T1USED
 $0A40-$0B3F key logger: 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C),
   written by wait_frame on every raw register change (sk $08 = key down,
   $0C = up; bit 3 = shift). Read it after a real-keyboard test.
@@ -139,7 +159,7 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$0680-$0690` | hot-swap trampoline + RTI stub |
 | `$0A00-$0A3F` | echo ring |
 | `$0A40-$0B3F` | key logger |
-| `$5000-$7FFF` | looper lanes (melody, drums, preset) |
+| `$5000-$9FFF` | looper lanes (M1, drums, P1, M2, P2) |
 | `$F0-$F1` | VBI lane pointer (ZP exception) |
 | `$2000-$3BFF` | code + data (MAIN cap) |
 | `$3C00-$3FFF` | RAM charset (ROM font + piano/meter glyphs on lowercase codes) |

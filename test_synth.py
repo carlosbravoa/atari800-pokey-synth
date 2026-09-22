@@ -108,6 +108,7 @@ def frame(key=None):
     call("kb_poll")
     call("loop_step")
     call("synth")
+    call("v2_step")
     call("drum_step")
     return w(L("OUTLO")), mem[L("VOLHI")], mem[L("ESTATE")]
 
@@ -256,16 +257,21 @@ check(len(on) == 1 and ml[on[0]] == 37 and len(off) == 1 and off[0] - on[0] == 1
 check(len(kick) == 1 and dl[kick[0]] == 1, f"drum lane: kick@{kick}")
 check(mem[L("PLANE")] == 1, "preset lane: PIANO at frame 0")
 # play one pass: note and kick fire at their recorded frames
-n0, d0 = mem[L("NOTECNT")], mem[L("DRUMCNT")]
 while w(L("LPOSLO")) != 0: frame(); main_frame()
 fired = {}
+v2vol = []
 for f in range(LL):
-    a, b = mem[L("NOTECNT")], mem[L("DRUMCNT")]
+    a, b, c = mem[L("NOTE2CNT")], mem[L("DRUMCNT")], mem[L("NOTECNT")]
     frame(); main_frame()
-    if mem[L("NOTECNT")] != a: fired.setdefault("note", f)
+    if mem[L("NOTE2CNT")] != a: fired.setdefault("v2note", f)
     if mem[L("DRUMCNT")] != b: fired.setdefault("kick", f)
-check(fired.get("note") == on[0] and fired.get("kick") == kick[0],
-      f"playback fires at the recorded frames {fired}")
+    if mem[L("NOTECNT")] != c: fired.setdefault("lead", f)
+    v2vol.append(mem[0xD205])
+check(fired.get("v2note") == on[0] and fired.get("kick") == kick[0] and "lead" not in fired,
+      f"track 1 replays on voice 2 at the recorded frames {fired}")
+check(max(v2vol[on[0]:on[0] + 5]) & 0x0F > 8 and v2vol[on[0]] & 0xF0 == 0xA0
+      and mem[0xD204] == mem[L("lay64") + 36],
+      f"voice 2 drives ch3: AUDC3 {v2vol[on[0]:on[0]+4]} AUDF3 {mem[0xD204]}")
 check(mem[L("LOOPCNT")] >= 2 and mem[L("LCELL")] <= 1, "loop wrapped, bar restarted")
 # overdub a snare
 tap(SP)
@@ -273,13 +279,25 @@ check(mem[L("LSTATE")] == 3, "SPACE while playing = overdub")
 for _ in range(5): frame()
 sn = w(L("LPOSLO"))
 frame(V); frame()
+for _ in range(10): frame()
+k0 = w(L("LPOSLO"))
+for _ in range(8): frame(K)             # overdub a melody note (K = C5)
+frame()
 tap(SP)
 check(mem[L("LSTATE")] == 2, "SPACE again = back to play")
 dl = [mem[L("DLANE") + i] for i in range(LL)]
 check(sorted(v for v in dl if v) == [1, 2], f"drum lane now kick + snare {[(i, v) for i, v in enumerate(dl) if v]}")
-d0 = mem[L("DRUMCNT")]
+m2 = [mem[L("M2LANE") + i] for i in range(LL)]
+on2 = [(i, v) for i, v in enumerate(m2) if v]
+check(len(on2) == 2 and on2[0][1] == 49 and on2[1][1] == 0xFE and on2[0][0] - k0 in (0, 1),
+      f"track 2 lane holds the overdubbed C5 {on2}")
+p2 = [(i, v) for i, v in enumerate(mem[L("P2LANE") + i] for i in range(LL)) if v]
+check(len(p2) == 1 and p2[0][1] == 1, f"track 2 preset stamped at overdub start {p2}")
+d0, n0, v0 = mem[L("DRUMCNT")], mem[L("NOTECNT")], mem[L("NOTE2CNT")]
 for _ in range(LL): frame(); main_frame()
 check(mem[L("DRUMCNT")] - d0 == 2, "a full pass plays both drums")
+check(mem[L("NOTECNT")] - n0 == 1 and mem[L("NOTE2CNT")] - v0 == 1,
+      "a full pass plays track 1 on voice 2 and track 2 on the lead")
 # octave survives the loop's preset event
 frame(0x16); main_frame(); frame()
 for _ in range(LL + 2): frame(); main_frame()
@@ -290,12 +308,29 @@ tap(TAB)
 n0 = mem[L("NOTECNT")] + mem[L("DRUMCNT")]
 for _ in range(LL + 5): frame(); main_frame()
 check(mem[L("LSTATE")] == 4 and mem[L("NOTECNT")] + mem[L("DRUMCNT")] == n0, "TAB stops: silence")
+check(mem[L("V2EST")] == 0, "voice 2 released on stop")
 tap(TAB)
 check(mem[L("LSTATE")] == 2 and w(L("LPOSLO")) < 3, "TAB again plays from the top")
 tap(BK)
 check(mem[L("LSTATE")] == 0, "BACKSPACE clears")
 tap(SP); frame(); tap(SP)
 check(mem[L("LSTATE")] == 0, "a loop under half a second is cancelled")
+
+# 10. drums-only loop: the layer keeps ch3 (ORGAN = octave-up layer)
+tap(BK)
+call("select_preset", a=1)
+tap(SP)
+for _ in range(10): frame()
+frame(C); frame()
+for _ in range(30): frame()
+tap(SP)
+check(mem[L("LSTATE")] == 2 and mem[L("T1USED")] == 0, "drums-only loop playing")
+for _ in range(4): frame(A)
+check(mem[0xD205] & 0xF0 == 0xA0 and mem[0xD205] & 0x0F > 5
+      and mem[0xD204] == mem[L("lay64") + 48],
+      f"ORGAN layer still on ch3 (AUDC3 {mem[0xD205]:02X}, AUDF3 = C5 octave)")
+for _ in range(20): frame()
+tap(BK)
 
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):
