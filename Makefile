@@ -3,10 +3,13 @@ LD65   := $(HOME)/.local/bin/ld65
 
 all: build/synth.xex
 
+demos.inc: gen_demos.py
+	python3 gen_demos.py
+
 tables.inc: gen_tables.py
 	python3 gen_tables.py
 
-build/synth.xex: synth.s tables.inc atari-xex.cfg
+build/synth.xex: synth.s tables.inc demos.inc atari-xex.cfg
 	@mkdir -p build
 	$(CA65) -g -o build/synth.o synth.s
 	$(LD65) -C atari-xex.cfg -Ln build/synth.lbl -o $@ build/synth.o

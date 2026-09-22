@@ -15,6 +15,10 @@ make deploy           # hot-swap onto the running machine / USR-launch from READ
 python3 hwtest.py     # real HID key presses on the board, verified by peeks
 ```
 
+Hardware tests assume nothing else is playing. `hwtest.py` starts with
+BKSP, `1` and RETURN, because a demo's overdub track changes the lead preset
+and edits persist per preset.
+
 `hwtest.py` gotcha: `AtariLink.key(hid, hold_ms=…)` returns immediately and
 the firmware keeps the key down for `hold_ms` — sleep past the hold before
 checking release state. The firmware injector appears to hold ONE key: pressing
@@ -37,6 +41,7 @@ The first key() of a link session is often lost; send a throwaway first.
 | `SPACE` | looper: record -> close loop (plays) -> overdub (drums + melody) <-> play |
 | `TAB` | looper: stop / play from the top |
 | `BACKSPACE` | looper: clear |
+| `Q` | built-in demo loops: next demo (loads + plays; jam or overdub on it) |
 
 Edits are kept per preset (the `live` table) until RETURN.
 
@@ -104,10 +109,10 @@ Edits are kept per preset (the `live` table) until RETURN.
   HID keys and checks lanes and counters. Per-pass counts are measured
   between loop wraps (`aligned()`), not over wall-clock windows.
 - VBI order: kb_poll -> loop_step -> synth (lead + layer) -> v2_step -> drum_step.
-- **Code budget**: MAIN ends at ~$3A55 against the $3BFF cap (~420 bytes
-  left). The next feature should move the pitch tables to a second load
-  segment (e.g. `$A000`, free since BASIC is off during `run` boots — but
-  NOT when USR-launched from READY; use `$4400-$4FFF` instead).
+- **Code budget**: two load segments. MAIN `$2000-$3BFF` holds code +
+  RODATA, ending ~$37DF (~1 KB free). HIDATA `$4400-$4FFF` holds the pitch
+  tables and demos, ending ~$4A43 (~1.5 KB free). Don't use `$A000+`: BASIC
+  is still mapped when USR-launched from READY.
 
 ## Later: dual POKEY
 
@@ -164,13 +169,25 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 | `$2000-$3BFF` | code + data (MAIN cap) |
 | `$3C00-$3FFF` | RAM charset (ROM font + piano/meter glyphs on lowercase codes) |
 | `$4000-$43BF` | screen |
+| `$4400-$4FFF` | HIDATA segment: pitch/env/key tables + demos |
 
-## Demo loop
+## Built-in demos (Q)
 
-`python3 demo_loop.py` pokes a 2-bar loop straight into the lanes and starts
-it: a BASS line on voice 2, a FLUTE melody on the lead, and a kick/snare/hat
-pattern. It's the quickest way to hear the looper. TAB and BACKSPACE control
-it like a recorded loop.
+Six demos: GROOVE, TECHNO, CHIPTUNE, DREAMY, ROCK, SPACE. They are defined
+in `gen_demos.py` with readable note names and generated into `demos.inc`.
+Format per demo: name(8) S N P1 P2, then T1 (step, note, dur)… $FF, then T2
+…$FF, then N drum bytes. `next_demo` stops and empties the loop (LCMD 3 +
+`wait_lcmd`), clears the lanes and expands the events. Note-on goes at
+step·S and note-off 2 frames before (step+dur)·S. It then sets LLEN and
+T1USED, sets LSTATE = STOP, and posts TAB to play from the top. A demo is
+a normal loop from then on: SPACE overdubs on it, TAB and BKSP work.
+DEMOIDX `$066F` (1..6, 0 = none) shows as `Q:<NAME>` on row 10.
+`hwdemo.py` presses Q through all six on hardware and checks each one's
+per-pass voice-2/lead/drum counts against the generator's data. To add a
+demo, add a `demo(...)` call. The py65 and hardware tests pick it up.
+
+`demo_loop.py` is the original PC-side poke of GROOVE, kept as an example
+of driving the lanes from the PC.
 
 ## Open issue (2026-09-22)
 

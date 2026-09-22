@@ -233,6 +233,17 @@ V2IDX    = $0660        ; note incl. chord
 V2PAR    = $0661        ; 12 bytes: track 1 preset params (copied from live)
 NOTE2CNT = $066D        ; +1 per voice-2 note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
+DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
+LASTDEMO = $0670        ; main: demo name as drawn
+K_Q      = $2F
+; demo loader ZP (main thread)
+ZMUL     = $8D          ; 16-bit product / frame
+ZSTEP    = $8F          ; frames per step (S)
+ZNST     = $90          ; steps (N)
+ZEV      = $91          ; event: step
+ZNOTE    = $92          ;        note
+ZDUR     = $93          ;        dur
+ZLANE    = $94          ; lane page base (hi byte)
 LS_EMPTY = 0
 LS_REC   = 1
 LS_PLAY  = 2
@@ -258,6 +269,11 @@ RTISTUB  = $0690
         .word $FFFF
         .word __MAIN_START__
         .word __MAIN_LAST__-1
+
+.segment "XEXHDR2"
+.import __HIMEM_START__, __HIMEM_LAST__
+        .word __HIMEM_START__
+        .word __HIMEM_LAST__-1
 
 .segment "XEXTRL"
         .word $02E0, $02E1
@@ -399,6 +415,7 @@ start:
         sta LASTLS
         lda #$FF
         sta PRESREQ
+        sta LASTDEMO
 
         lda #$0E                ; GR.0 text luminance
         sta COLOR1
@@ -644,6 +661,8 @@ loop_space:
         lda LSTATE
         bne @go                 ; EMPTY -> fresh lanes before recording
         jsr clear_lanes
+        lda #0
+        sta DEMOIDX
 @go:    lda #1
         sta LCMD
         rts
@@ -654,6 +673,151 @@ loop_tab:
 loop_clear:
         lda #3
         sta LCMD
+        lda #0
+        sta DEMOIDX
+        rts
+
+; ---- built-in demos: Q cycles, loads and plays -----------------------------
+next_demo:
+        ldx DEMOIDX
+        cpx #NDEMO
+        bcc @n
+        ldx #0
+@n:     inx
+        stx DEMOIDX
+        dex
+        lda demo_lo,x
+        sta ZPTR
+        lda demo_hi,x
+        sta ZPTR+1
+        lda #3                  ; stop + empty the loop, wait for the VBI
+        sta LCMD
+        jsr wait_lcmd
+        jsr clear_lanes
+        lda ZPTR                ; skip the 8-char name
+        clc
+        adc #8
+        sta ZPTR
+        bcc @h
+        inc ZPTR+1
+@h:     jsr getb
+        sta ZSTEP
+        jsr getb
+        sta ZNST
+        jsr getb                ; P1 -> track 1 preset at frame 0
+        sta PLANE
+        jsr getb                ; P2 -> track 2 preset
+        sta P2LANE
+        lda #>MLANE
+        jsr load_track
+        sta T1USED              ; nonzero if track 1 had notes
+        lda #>M2LANE
+        jsr load_track
+        ; drums: one byte per step
+        lda #0
+        sta ZEV
+@d:     jsr getb
+        beq @dn
+        pha
+        lda ZEV
+        jsr step_frame
+        lda #>DLANE
+        jsr lane_at
+        pla
+        ldy #0
+        sta (ZSCR),y
+@dn:    inc ZEV
+        lda ZEV
+        cmp ZNST
+        bne @d
+        lda ZNST                ; LLEN = N*S
+        jsr step_frame
+        lda ZMUL
+        sta LLENLO
+        lda ZMUL+1
+        sta LLENHI
+        lda #LS_STOP            ; VBI ignores lanes until TAB plays them
+        sta LSTATE
+        lda #2
+        sta LCMD
+        rts
+
+wait_lcmd:                      ; until the VBI has taken LCMD
+        lda LCMD
+        bne wait_lcmd
+        rts
+
+getb:   ldy #0                  ; A = next demo byte (flags from lda)
+        lda (ZPTR),y
+        inc ZPTR
+        bne @x
+        inc ZPTR+1
+@x:     cmp #0
+        rts
+
+step_frame:                     ; ZMUL = A * ZSTEP
+        sta ZT1
+        lda #0
+        sta ZMUL
+        sta ZMUL+1
+        ldx ZSTEP
+@m:     clc
+        lda ZMUL
+        adc ZT1
+        sta ZMUL
+        bcc @c
+        inc ZMUL+1
+@c:     dex
+        bne @m
+        rts
+
+lane_at:                        ; ZSCR = (A<<8) + ZMUL
+        clc
+        adc ZMUL+1
+        sta ZSCR+1
+        lda ZMUL
+        sta ZSCR
+        rts
+
+load_track:                     ; A = lane page; events until $FF
+        sta ZLANE               ; returns A = number of notes
+        lda #0
+        sta ZT2
+@e:     jsr getb
+        cmp #$FF
+        beq @x
+        sta ZEV
+        jsr getb
+        sta ZNOTE
+        jsr getb
+        sta ZDUR
+        inc ZT2
+        lda ZEV                 ; note-on at step*S
+        jsr step_frame
+        lda ZLANE
+        jsr lane_at
+        ldy #0
+        ldx ZNOTE
+        inx
+        txa
+        sta (ZSCR),y
+        lda ZEV                 ; note-off 2 frames before (step+dur)*S
+        clc
+        adc ZDUR
+        jsr step_frame
+        lda ZMUL
+        sec
+        sbc #2
+        sta ZMUL
+        bcs @o
+        dec ZMUL+1
+@o:     lda ZLANE
+        jsr lane_at
+        ldy #0
+        lda #$FE
+        sta (ZSCR),y
+        jmp @e
+@x:     lda ZT2
         rts
 
 clear_lanes:
@@ -844,7 +1008,12 @@ ui_update:
         inx
         cpx #16
         bne @lb
-@mv:    ; volume meter: row 9, cols 19-33
+@mv:    lda DEMOIDX
+        cmp LASTDEMO
+        beq @vm
+        sta LASTDEMO
+        jsr draw_demo
+@vm:    ; volume meter: row 9, cols 19-33
         ldx #0
 @mc:    lda #G_O
         cpx VOLHI
@@ -854,6 +1023,37 @@ ui_update:
         inx
         cpx #15
         bne @mc
+        rts
+
+draw_demo:                      ; row 10 col 29: "Q DEMOS" / "Q:<name>"
+        ldx #0
+        lda DEMOIDX
+        bne @nm
+@t:     lda qdemotxt,x
+        jsr asc2int
+        sta SCREEN+10*40+29,x
+        inx
+        cpx #10
+        bne @t
+        rts
+@nm:    tax
+        dex
+        lda demo_lo,x
+        sta ZPTR
+        lda demo_hi,x
+        sta ZPTR+1
+        lda #'Q'-32
+        sta SCREEN+10*40+29
+        lda #':'-32
+        sta SCREEN+10*40+30
+        ldy #0
+@c:     lda (ZPTR),y
+        jsr asc2int
+        ora #$80
+        sta SCREEN+10*40+31,y
+        iny
+        cpy #8
+        bne @c
         rts
 
 draw_note:                      ; row 9 col 6: "C#4" or "---"
@@ -2435,9 +2635,11 @@ dli:
         rti
 
 ; ===========================================================================
-.segment "RODATA"
-
+.segment "HIDATA"
 .include "tables.inc"
+.include "demos.inc"
+
+.segment "RODATA"
 
 ; waveform AUDC distortion bits: PURE BUZZ GRIT RASP NOISE HISS
 wavebits:   .byte $A0,$C0,$40,$20,$80,$00
@@ -2463,15 +2665,16 @@ dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
-            .byte K_SPACE,K_TAB,K_BKSP
-NCMD = 11
+            .byte K_SPACE,K_TAB,K_BKSP,K_Q
+NCMD = 12
 cmdlo:      .byte <(oct_down-1),<(oct_up-1),<(ed_up-1),<(ed_down-1)
             .byte <(ed_left-1),<(ed_right-1),<(reset_preset-1),<(hush-1)
-            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1)
+            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(next_demo-1)
 cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
-            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1)
+            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(next_demo-1)
 lsnames:    .byte "EMPTYREC  PLAY DUB  STOP "
+qdemotxt:   .byte "Q DEMOS   "
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30,$32   ; 1..9, 0
 presetkey:  .byte "1234567890"
 
@@ -2523,12 +2726,11 @@ static_text:
         .byte 9,1,0, "NOTE",0
         .byte 9,12,0, "VOLUME",0
         .byte 11,1,0, "DRUMS",0
-        .byte 15,21,0, "< PICK: KEYS 1-9,0",0
+        .byte 15,21,0, "< 1-9,0   ESC=HUSH",0
         .byte 16,1,$80, "SOUND EDITOR",0
         .byte 16,14,0, "ARROWS/STICK  RET=RESET",0
         .byte 10,1,0, "LOOP",0
-        .byte 10,29,0, "BKSP CLEAR",0
-        .byte 23,0,0, "Z/X OCTAVE ESC HUSH  SPACE REC  TAB PLAY",0
+        .byte 23,0,0, "Z/X OCT  SPACE REC  TAB PLAY  BKSP CLEAR",0
         .byte $FF
 
 ; screen row address tables

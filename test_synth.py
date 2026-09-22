@@ -53,6 +53,10 @@ def call(name, a=0, x=0, y=0, limit=200000):
     m.pc = L(name)
     n = 0
     while m.pc != SENT:
+        if m.pc == lbl.get("wait_lcmd"):   # stand in for the VBI taking LCMD
+            if mem[lbl["LCMD"]] == 3:
+                mem[lbl["LSTATE"]] = 0
+            mem[lbl["LCMD"]] = 0
         m.step()
         n += 1
         assert n < limit, f"runaway in {name} pc={m.pc:04X}"
@@ -331,6 +335,39 @@ check(mem[0xD205] & 0xF0 == 0xA0 and mem[0xD205] & 0x0F > 5
       f"ORGAN layer still on ch3 (AUDC3 {mem[0xD205]:02X}, AUDF3 = C5 octave)")
 for _ in range(20): frame()
 tap(BK)
+
+# 11. built-in demos: Q loads + plays; lanes match demos.inc; names show
+import importlib.util
+spec = importlib.util.spec_from_file_location("gd", "gen_demos.py")
+gd = importlib.util.module_from_spec(spec)
+import contextlib, io
+with contextlib.redirect_stdout(io.StringIO()):
+    spec.loader.exec_module(gd)
+Q = 0x2F
+for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
+    tap(Q)
+    LL = w(L("LLENLO"))
+    check(mem[L("DEMOIDX")] == di + 1 and LL == N * S and mem[L("LSTATE")] == 2,
+          f"Q -> demo {di + 1} {name}: {LL} frames, playing")
+    ok_l = all(mem[L("MLANE") + t * S] == nn + 1 and mem[L("MLANE") + (t + d) * S - 2] == 0xFE
+               for t, nn, d in t1)
+    ok_l &= all(mem[L("M2LANE") + t * S] == nn + 1 for t, nn, d in t2)
+    ok_l &= all(mem[L("DLANE") + k * S] == v for k, v in enumerate(dr))
+    ok_l &= mem[L("PLANE")] == p1 and mem[L("P2LANE")] == p2
+    check(ok_l, f"  lanes match the demo data")
+    while w(L("LPOSLO")) != 0: frame(); main_frame()
+    c = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "DRUMCNT")]
+    for _ in range(LL): frame(); main_frame()
+    got = [(mem[L(x)] - c[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "DRUMCNT"))]
+    want = [len(t1), len(t2), sum(1 for v in dr if v)]
+    check(got == want, f"  one pass plays voice2/lead/drums {got} (want {want})")
+    row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 29:0x4000 + 10 * 40 + 39])
+    check(row.strip() == f"Q:{name}", f"  row 10 shows '{row}'")
+tap(Q)
+check(mem[L("DEMOIDX")] == 1, "Q wraps back to demo 1")
+tap(BK)
+check(mem[L("DEMOIDX")] == 0 and mem[L("LSTATE")] == 0, "BACKSPACE clears the demo")
+for _ in range(3): frame(); main_frame()
 
 # edge: every preset x every key x octave extremes, run frames w/o runaway
 for p in range(10):

@@ -28,6 +28,8 @@ def check(c, msg):
 
 
 with AtariLink() as l:
+    for k in (0x29, 0x2A, 0x1E, 0x28):  # throwaway, BKSP (stop loop), 1 PIANO, RETURN
+        l.key(k, hold_ms=100); time.sleep(0.4)
     s0 = st(l); time.sleep(0.5); s1 = st(l)
     check(s1['frame'] != s0['frame'] and s1['ui'] != s0['ui'],
           f"VBI + main loop alive (frame {s0['frame']}->{s1['frame']})")
