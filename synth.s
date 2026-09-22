@@ -3336,7 +3336,7 @@ dr_frq:     .byte  6,  6,  3,  3,110, 70, 16,  4
 dr_dlt:     .byte  5,  0,  0,  0,  5,  3,  0,  0
 dr_ctl:     .byte $C0,$80,$80,$80,$A0,$A0,$80,$80
 dr_vsh:     .byte  0,  0,  0,  2,  1,  1,  0,  3
-dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
+dr_len:     .byte 16, 14,  7, 22, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 dr_seq:     .byte  2,  0,  0,  0,  0,  0,  0,  0     ; script index (0 = envelope)
 ; scripted drums: (AUDF, AUDC) per frame, AUDC 0 ends. Kick = the classic
