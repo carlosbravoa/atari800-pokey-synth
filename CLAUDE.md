@@ -308,7 +308,8 @@ Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.
 
 ## Built-in demos (< >)
 
-Six demos: GROOVE, TECHNO, CHIPTUNE, DREAMY, ROCK, SPACE. They are defined
+Seven demos: GROOVE, TECHNO, CHIPTUNE, DREAMY, ROCK, SPACE, ANTHEM (an original
+4-bar pop hook over Am-F-C-G, 64 steps at S=7). They are defined
 in `gen_demos.py` with readable note names and generated into `demos.inc`.
 Format per demo: name(8) S N P1 P2, then T1 (step, note, dur)… $FF, then T2
 …$FF, then N drum bytes. `next_demo` stops and empties the loop (LCMD 3 +
