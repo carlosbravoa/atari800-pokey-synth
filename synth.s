@@ -235,6 +235,8 @@ NOTE2CNT = $066D        ; +1 per voice-2 note-on
 T1USED   = $066E        ; track 1 has melody -> voice 2 owns ch3 in PLAY/DUB
 DEMOIDX  = $066F        ; built-in demo loaded: 1..NDEMO, 0 = none
 LASTDEMO = $0670        ; main: demo name as drawn
+MUTEMEL  = $0671        ; 1 = loop plays drums only (melody tracks muted)
+K_Q      = $2F          ; toggles MUTEMEL
 K_LT     = $36          ; '<' (PC '-' in Atari layout): previous demo
 K_GT     = $37          ; '>' (PC '='): next demo
 ; demo loader ZP (main thread)
@@ -671,6 +673,11 @@ loop_tab:
         lda #2
         sta LCMD
         rts
+toggle_mute:
+        lda #5
+        sta LCMD
+        rts
+
 loop_clear:
         lda #3
         sta LCMD
@@ -976,13 +983,19 @@ ui_update:
         beq @m
         sta DISPNOTE
         jsr draw_note
-@m:     lda LSTATE
-        cmp LASTLS
+@m:     lda LSTATE              ; PLAY + muted shows as DRUMS (name 5)
+        cmp #LS_PLAY
+        bne @m1
+        ldx MUTEMEL
+        beq @m1
+        lda #5
+@m1:    cmp LASTLS
         beq @lc
         sta LASTLS
+        sta ZT1
         asl a
         asl a
-        adc LSTATE              ; *5
+        adc ZT1                 ; *5
         tax
         ldy #0
         lda #0
@@ -1844,6 +1857,8 @@ lp_rec: jsr lp_ptr
 lp_play:
         jsr lp_ptr
         ldy #0
+        lda MUTEMEL             ; drums-only: skip both melody tracks
+        bne @d
         lda (VP),y              ; track 1 melody -> voice 2
         beq @d
         cmp #$FE
@@ -1880,6 +1895,8 @@ lp_play:
         ldy #0
         lda LIVEM
         bne @m2dub
+        lda MUTEMEL
+        bne @q2
         lda (VP),y
         beq @q2
         cmp #$FE
@@ -1898,6 +1915,8 @@ lp_play:
         ldy #0
         lda LIVEP
         bne @q2dub
+        lda MUTEMEL             ; drums-only: the player keeps their sound
+        bne @adv
         lda (VP),y
         beq @adv
         sec
@@ -2010,6 +2029,22 @@ lp_hush:
         sta ESTATE
 @x:     rts
 
+lp_mute:                        ; toggle drums-only; silence the loop's voices
+        lda MUTEMEL
+        eor #1
+        sta MUTEMEL
+        beq @x
+        lda #0
+        sta V2EST
+        sta V2VHI
+        lda GATE                ; a held live note keeps sounding
+        bne @x
+        lda ESTATE
+        beq @x
+        lda #4
+        sta ESTATE
+@x:     rts
+
 lp_dub: ldx PRESET              ; track 2 starts in the current sound
         inx
         stx LIVEP
@@ -2072,7 +2107,10 @@ loop_cmd:                       ; A = command
         sta LSTATE
         jmp lp_hush
 @tx:    rts
-@clr:   cmp #3
+@clr:   cmp #5
+        bne @c3
+        jmp lp_mute
+@c3:    cmp #3
         bne @stp
         jmp lp_empty
 @stp:   ldx LSTATE              ; 4: stop if playing
@@ -2117,6 +2155,8 @@ v2_off:
 @x:     rts
 
 v2_owns:                        ; Z clear (bne) when voice 2 owns ch3
+        lda MUTEMEL
+        bne @no
         lda T1USED
         beq @no
         lda LSTATE
@@ -2674,15 +2714,15 @@ dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
 dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
-            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT
-NCMD = 13
+            .byte K_SPACE,K_TAB,K_BKSP,K_LT,K_GT,K_Q
+NCMD = 14
 cmdlo:      .byte <(oct_down-1),<(oct_up-1),<(ed_up-1),<(ed_down-1)
             .byte <(ed_left-1),<(ed_right-1),<(reset_preset-1),<(hush-1)
-            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(prev_demo-1),<(next_demo-1)
+            .byte <(loop_space-1),<(loop_tab-1),<(loop_clear-1),<(prev_demo-1),<(next_demo-1),<(toggle_mute-1)
 cmdhi:      .byte >(oct_down-1),>(oct_up-1),>(ed_up-1),>(ed_down-1)
             .byte >(ed_left-1),>(ed_right-1),>(reset_preset-1),>(hush-1)
-            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1)
-lsnames:    .byte "EMPTYREC  PLAY DUB  STOP "
+            .byte >(loop_space-1),>(loop_tab-1),>(loop_clear-1),>(prev_demo-1),>(next_demo-1),>(toggle_mute-1)
+lsnames:    .byte "EMPTYREC  PLAY DUB  STOP DRUMS"
 qdemotxt:   .byte "< DEMOS  >"
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30,$32   ; 1..9, 0
 presetkey:  .byte "1234567890"
@@ -2735,7 +2775,7 @@ static_text:
         .byte 9,1,0, "NOTE",0
         .byte 9,12,0, "VOLUME",0
         .byte 11,1,0, "DRUMS",0
-        .byte 15,21,0, "< 1-9,0   ESC=HUSH",0
+        .byte 15,21,0, "Q=DRUMS  ESC=HUSH",0
         .byte 16,1,$80, "SOUND EDITOR",0
         .byte 16,14,0, "ARROWS/STICK  RET=RESET",0
         .byte 10,1,0, "LOOP",0

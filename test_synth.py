@@ -348,7 +348,7 @@ for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
     tap(Q)
     LL = w(L("LLENLO"))
     check(mem[L("DEMOIDX")] == di + 1 and LL == N * S and mem[L("LSTATE")] == 2,
-          f"Q -> demo {di + 1} {name}: {LL} frames, playing")
+          f"> -> demo {di + 1} {name}: {LL} frames, playing")
     ok_l = all(mem[L("MLANE") + t * S] == nn + 1 and mem[L("MLANE") + (t + d) * S - 2] == 0xFE
                for t, nn, d in t1)
     ok_l &= all(mem[L("M2LANE") + t * S] == nn + 1 for t, nn, d in t2)
@@ -365,6 +365,34 @@ for di, (name, S, N, p1, p2, t1, t2, dr) in enumerate(gd.DEMOS):
     check(row == f"<{name:<8}>", f"  row 10 shows '{row}'")
 tap(Q)
 check(mem[L("DEMOIDX")] == 1, "> wraps back to demo 1")
+# drums-only toggle (Q) on GROOVE
+MQ = 0x2F
+call("select_preset", a=0)             # player picks PIANO
+tap(MQ)
+check(mem[L("MUTEMEL")] == 1, "Q mutes the loop's melody")
+row = "".join(chr((c & 0x7F) + 32) for c in mem[0x4000 + 10 * 40 + 6:0x4000 + 10 * 40 + 11])
+check(row == "DRUMS", f"  loop row shows '{row}'")
+while w(L("LPOSLO")) != 0: frame(); main_frame()
+c = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT", "DRUMCNT")]
+for _ in range(w(L("LLENLO"))): frame(); main_frame()
+got = [(mem[L(x)] - c[i]) & 255 for i, x in enumerate(("NOTE2CNT", "NOTECNT", "DRUMCNT"))]
+check(got == [0, 0, 16] and mem[L("PRESET")] == 0,
+      f"  a pass plays drums only {got}, player keeps PIANO")
+for _ in range(4): frame(A)
+check(mem[L("NOTE")] == 36 and mem[L("VOLHI")] > 0, "  live playing works over the drums")
+for _ in range(30): frame()
+call("select_preset", a=1)             # ORGAN: its octave layer gets ch3 back
+for _ in range(4): frame(A)
+check(mem[0xD205] & 0x0F > 5 and mem[0xD204] == mem[L("lay64") + 48],
+      "  the layer has ch3 back while muted")
+for _ in range(30): frame()
+tap(MQ)
+check(mem[L("MUTEMEL")] == 0, "Q again unmutes")
+c = [mem[L(x)] for x in ("NOTE2CNT", "NOTECNT")]
+while w(L("LPOSLO")) != 0: frame(); main_frame()
+for _ in range(w(L("LLENLO"))): frame(); main_frame()
+check((mem[L("NOTE2CNT")] - c[0]) & 255 >= 16 and (mem[L("NOTECNT")] - c[1]) & 255 >= 8,
+      "  melodies are back")
 tap(PREV)
 check(mem[L("DEMOIDX")] == len(gd.DEMOS) and w(L("LLENLO")) == gd.DEMOS[-1][1] * gd.DEMOS[-1][2],
       "< from demo 1 wraps to the last demo")

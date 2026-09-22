@@ -41,6 +41,7 @@ The first key() of a link session is often lost; send a throwaway first.
 | `SPACE` | looper: record -> close loop (plays) -> overdub (drums + melody) <-> play |
 | `TAB` | looper: stop / play from the top |
 | `BACKSPACE` | looper: clear |
+| `Q` | drums only: mute the loop's melody tracks (any loop or demo) and keep your own sound |
 | `<` `>` (PC `-` `=`) | built-in demo loops: previous / next (loads + plays; jam or overdub on it) |
 
 Edits are kept per preset (the `live` table) until RETURN.
@@ -91,6 +92,11 @@ Edits are kept per preset (the `live` table) until RETURN.
   (`v2_owns`: T1USED and PLAY/DUB). Otherwise the lead's layer
   (sub/fifth/oct/chorus/echo) keeps ch3, so drum-only loops keep it.
 - The dual POKEY (below) is the path to a full-quality voice 2.
+- **Drums only** (`Q`, MUTEMEL `$0671`, command LCMD 5 -> `lp_mute`) skips
+  both melody lanes AND track 2's preset lane, so the player keeps their
+  preset. `v2_owns` is false, so ch3 goes back to the layer. Overdub still
+  records. The loop row shows `DRUMS` in place of `PLAY`. It persists across
+  demos and loops until toggled.
 - States (LSTATE): EMPTY -> SPACE -> REC -> SPACE -> PLAY <-> SPACE <-> DUB;
   TAB = STOP/PLAY; BKSP = EMPTY; ESC also stops. A loop under 30 frames
   cancels. The 4096 cap auto-closes it. A key held at close gets a note-off

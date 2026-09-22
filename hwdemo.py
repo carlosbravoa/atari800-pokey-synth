@@ -45,5 +45,20 @@ with AtariLink() as l:
     l.key(PREV, hold_ms=100); time.sleep(0.5)
     check(st()[0x6F] == len(gd.DEMOS), "< wraps back to the last demo")
     l.key(Q, hold_ms=100); time.sleep(0.5)
-    check(st()[0x6F] == 1, "> again: GROOVE (left playing)")
+    check(st()[0x6F] == 1, "> again: GROOVE")
+    MUTE = 0x14                                   # Q
+    l.key(0x1E, hold_ms=100); time.sleep(0.4)     # player picks 1 PIANO
+    l.key(MUTE, hold_ms=100); time.sleep(0.4)
+    check(st()[0x71] == 1 and "DRUMS" in l.screen().split("\n")[10], "Q -> drums only")
+    c = st()[0x58]
+    while st()[0x58] == c:
+        pass
+    a = st()
+    while (st()[0x58] - a[0x58]) & 255 < 1:
+        pass
+    z = st()
+    got = [(z[i] - a[i]) & 255 for i in (0x6D, 0x23, 0x24)]
+    check(got == [0, 0, 16] and z[0] == 0, f"  muted pass voice2/lead/drums {got}, preset {z[0]}")
+    l.key(MUTE, hold_ms=100); time.sleep(0.4)
+    check(st()[0x71] == 0, "Q again -> melodies back (left playing)")
 print("ALL PASS" if ok else "SOME FAILED")
