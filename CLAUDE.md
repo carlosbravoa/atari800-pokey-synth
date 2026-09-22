@@ -19,6 +19,7 @@ python3 hwtest.py     # real HID key presses on the board, verified by peeks
 the firmware keeps the key down for `hold_ms` — sleep past the hold before
 checking release state. The firmware injector appears to hold ONE key: pressing
 a second releases the first, so rollover can't be fully tested remotely.
+The first key() of a link session is often lost; send a throwaway first.
 
 ## Controls (GarageBand "musical typing")
 
@@ -53,7 +54,10 @@ Edits are kept per preset (the `live` table) until RETURN.
   CHORUS (one AUDF step detune) / ECHO (32-frame ring at `$0A00`, 21-frame
   delay, half volume).
 - **Drums**: ch4 envelope engine (FRQ += DLT, clamps at 255;
-  vol = min(TMR·4 >> VSH, 15)).
+  vol = min(TMR·4 >> VSH, 15)), with an optional one-frame loud noise
+  click (`dr_clk` AUDF) as the attack transient. Keep hat noise at AUDF ≥3:
+  AUDF 0-1 noise is mostly above what a TV speaker reproduces (was
+  "almost inaudible").
 - **Keyboard**: OS key/break IRQs are disabled. The VBI polls KBCODE +
   SKSTAT bit 2 (held), so notes gate on press and release. New presses are
   posted to the main thread (KEYEV/KEYSEQ). Legato: with GLIDE > 0 a new note
@@ -80,7 +84,11 @@ $0617 FRAME   $0619 NOTEIDX (incl. chord)  $061B REMKEY / $061C REMHOLD
   (remote test: poke a KBCODE into REMKEY, then frames into REMHOLD)
 $061D-21 drum engine  $0622 DRUMLIT  $0623 NOTECNT  $0624 DRUMCNT
 $0625 KEYCNT  $0627 GATE  $0630-3B PARAMS (live sound)  $063D PARKREQ
-$0643 UICNT (main-loop liveness)
+$0643 UICNT (main-loop liveness)  $0644 DCLK
+$0645 LOGPOS  $0646 LOGN  $0647 LASTKB  $0648 LASTSK
+$0A40-$0B3F key logger: 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C),
+  written by wait_frame on every raw register change (sk $08 = key down,
+  $0C = up; bit 3 = shift). Read it after a real-keyboard test.
 ```
 
 Params: WAVE ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP(7=off) GLIDE.

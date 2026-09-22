@@ -189,6 +189,13 @@ LASTDRUM = $0640
 DISPNOTE = $0641
 PREVCON  = $0642
 UICNT    = $0643        ; main: +1 per UI frame (liveness)
+DCLK     = $0644        ; drum: AUDF of a 1-frame noise click (0 = none)
+LOGPOS   = $0645        ; key logger: next slot (0-63)
+LOGN     = $0646        ;   total changes logged (wraps)
+LASTKB   = $0647        ;   last KBCODE seen
+LASTSK   = $0648        ;   last SKSTAT & $0C seen
+LOGBUF   = $0A40        ; 64 x (RTCLOK lo, VCOUNT, KBCODE, SKSTAT&$0C)
+ZWF      = $8C          ; wait_frame: frame to wait past
 
 NPARAM   = 12
 PSTRIDE  = 13           ; preset row: 12 params + octave
@@ -425,9 +432,43 @@ park_self:
         cli
         jmp TRAMP
 
+; while waiting, log every change of the raw keyboard registers so a
+; two-key test on the real keyboard shows exactly what POKEY reports
 wait_frame:
         lda RTCLOK+2
-@w:     cmp RTCLOK+2
+        sta ZWF
+@w:     lda KBCODE
+        cmp LASTKB
+        bne @log
+        lda SKSTAT
+        and #$0C
+        cmp LASTSK
+        beq @nx
+@log:   lda KBCODE
+        sta LASTKB
+        lda SKSTAT
+        and #$0C
+        sta LASTSK
+        lda LOGPOS
+        asl a
+        asl a
+        tax
+        lda RTCLOK+2
+        sta LOGBUF,x
+        lda VCOUNT
+        sta LOGBUF+1,x
+        lda LASTKB
+        sta LOGBUF+2,x
+        lda LASTSK
+        sta LOGBUF+3,x
+        inc LOGN
+        lda LOGPOS
+        clc
+        adc #1
+        and #63
+        sta LOGPOS
+@nx:    lda RTCLOK+2
+        cmp ZWF
         beq @w
         rts
 
@@ -1320,6 +1361,8 @@ drum_trig:                      ; A = drum 0-7
         sta DCTL
         lda dr_vsh,x
         sta DVSH
+        lda dr_clk,x
+        sta DCLK
         lda dr_len,x
         sta DTMR
         rts
@@ -1328,6 +1371,15 @@ drum_step:
         lda DTMR
         beq @off
         dec DTMR
+        lda DCLK                ; attack transient: one frame of loud noise
+        beq @body
+        sta AUDF4
+        lda #$8F
+        sta AUDC4
+        lda #0
+        sta DCLK
+        rts
+@body:
         lda DFRQ
         clc
         adc DDLT
@@ -1778,11 +1830,15 @@ vibtab:     .byte 0,1,2,1,0,3,4,3       ; 1/2 +half/+full, 3/4 -half/-full
 octbase:    .byte 0, 0,12,24,36,48,60,72
 
 ; drums: KICK SNARE HAT OPEN TOM TOM2 CLAP CRASH
-dr_frq:     .byte 16, 10,  0,  1,110, 70, 24,  2
-dr_dlt:     .byte  6,  0,  0,  0,  5,  3,  0,  0
+; noise at AUDF 0-1 sits mostly above what a TV speaker reproduces: the
+; hats live at AUDF 3. vol = min(TMR*4 >> VSH, 15): VSH 0 = full until the
+; last 3 frames (punch), 2 = linear fade from 15, 3 = long fade.
+dr_frq:     .byte  6,  6,  3,  3,110, 70, 16,  4
+dr_dlt:     .byte  5,  0,  0,  0,  5,  3,  0,  0
 dr_ctl:     .byte $C0,$80,$80,$80,$A0,$A0,$80,$80
-dr_vsh:     .byte  1,  1,  0,  3,  1,  1,  0,  4
-dr_len:     .byte 12, 12,  3, 24, 16, 14,  8, 60
+dr_vsh:     .byte  0,  0,  0,  2,  1,  1,  0,  3
+dr_len:     .byte 16, 14,  7, 30, 16, 14, 10, 60
+dr_clk:     .byte  8,  2,  0,  0,  8,  8,  0,  0     ; click AUDF (0 none)
 
 cmdkeys:    .byte K_Z,K_X,K_UP,K_DOWN,K_LEFT,K_RIGHT,K_RET,K_ESC
 NCMD = 8
