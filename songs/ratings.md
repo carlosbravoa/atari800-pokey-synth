@@ -93,3 +93,21 @@ tuning heuristics on ears.
 | btdslv5surf | 5 | |
 | topgear1 | 5 | 1756 notes + 585 hits in 50 s: the stream keeps up |
 | drmfever | 1-2 | source problem: melody+accompaniment+bass share one channel; skipped |
+| Dbz2 | 5 | |
+| smb109 | 5 | |
+
+### Round 2 summary (9 files, picker fixed as we went)
+
+5: rcr-main (after the top-line fix), rcr-boss, btdslv5surf, topgear1,
+Dbz2, smb109 · 4: battletoads_turbo (after percussion detection) ·
+3: bt-theme (poor source) · 1-2: drmfever (melody, accompaniment and bass
+share one channel in the source)
+
+Three more picker lessons, all confirmed on the machine:
+7. **Score the top line, not raw polyphony** - melodies are often the top
+   of a chord channel (rcr-main 4 -> 5).
+8. **Percussion hides on ordinary channels** in rips (sound-effect program,
+   or 2 pitches at 10/s): keep it out of the melody and play it as drums,
+   mapped by pitch order (battletoads_turbo 1-2 -> 4).
+9. **A wide range with a low centre is a whole arrangement**, not a tune:
+   its top line mixes melody with accompaniment.
