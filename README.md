@@ -14,6 +14,12 @@ POKEY and switch to stereo by themselves when a second POKEY answers at
   and instruments each voice is playing, an oscilloscope, a progress bar and
   a clock.
 
+![POKEY PLAYER playing ANTHEM in stereo: voice meters with peak hold, the
+notes and instruments per voice, percussion LEDs and the oscilloscope](docs/pokey-player.png)
+
+*POKEY PLAYER playing ANTHEM in stereo (screenshot from the Altirra
+emulator).*
+
 Both programs use the same sound engine. `gen_engine.py` copies it out of
 `synth.s` into `engine.inc`, so a sound fix reaches both on the next build.
 
@@ -53,6 +59,9 @@ compressed so every note shows a few cycles.
 D1: and cold-boot. The screen turns blue while the loader reads the player.
 The player then reads the song list and loads each song from disk when you
 pick it. The disk holds the album: 37 songs, about an hour.
+
+Releases on GitHub carry both programs ready to run: `POKEY-SYNTH.xex`
+and the `POKEY-PLAYER.atr` disk.
 
 **As a .xex:** `build/player.xex` has five songs built in, which is all that
 fits in memory. `make playerdeploy` puts it on the board over the PC link.

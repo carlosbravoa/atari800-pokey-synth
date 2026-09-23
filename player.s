@@ -301,6 +301,13 @@ start:
 mainloop:
         jsr wait_frame
         inc DRAWN
+.ifdef MEASURE
+        lda RTCLOK+1            ; ~30 s after boot: dump $0000-$0CFF to the
+        cmp #7                  ;  emulator's H1: device, then stop (never
+        bcc @run                ;  in a real build)
+        jmp measure_dump
+@run:
+.endif
         lda PARKREQ
         bne park_self
         jsr read_keys
@@ -356,6 +363,38 @@ park_self:                      ; deploy.py hot-swap: detach and wait
         sta IRQEN
         cli
         jmp TRAMP
+
+.ifdef MEASURE
+measure_dump:
+        ldx #$10                ; IOCB 1: OPEN "H1:M.BIN" for writing
+        lda #3
+        sta $0342,x
+        lda #<@name
+        sta $0344,x
+        lda #>@name
+        sta $0345,x
+        lda #8
+        sta $034A,x
+        lda #0
+        sta $034B,x
+        jsr $E456
+        ldx #$10                ; PUT $0D00 bytes from $0000
+        lda #11
+        sta $0342,x
+        lda #0
+        sta $0344,x
+        sta $0345,x
+        sta $0348,x
+        lda #$0D
+        sta $0349,x
+        jsr $E456
+        ldx #$10
+        lda #12                 ; CLOSE
+        sta $0342,x
+        jsr $E456
+@h:     jmp @h
+@name:  .byte "H1:M.BIN",$9B
+.endif
 
 wait_frame:
         lda RTCLOK+2
@@ -643,6 +682,14 @@ song_load:                      ; A = song index
         bcc @ok
         rts                     ; no such song (or an empty catalog)
 @ok:    sta SONGN
+.ifdef MEASURE
+        ldx RTCLOK+1            ; the machine's clock when this song began
+        stx $06C0
+        ldx RTCLOK+2
+        stx $06C1
+        ldx DRAWN
+        stx $06C2
+.endif
         lda #0
         sta PLAYING
         sta PAUSED
