@@ -121,3 +121,12 @@ Three more picker lessons, all confirmed on the machine:
 | KoopaTroopaBeach | 5 | |
 | dbz3batt | skipped | conversion fine, source poor (per Carlos) |
 | temp | 5 | single-part file: doubled an octave down + echoed on POKEY2 for stereo |
+
+### Round 4 (all remaining files converted; interesting ones played)
+
+| file | rating | notes |
+|---|---|---|
+| gtgm | 4 | 97%-chord lead with repeated notes -> PIANO |
+| ng2_rfb | 1-2 | skipped by Carlos; lead is a step-0.1 repeated line |
+| dd2shad | 5 | lead = top line of an 88%-chord channel |
+| vanlake | skipped | lead fixed to the xylophone line (tuned percussion = lead family) |

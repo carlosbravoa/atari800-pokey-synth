@@ -86,7 +86,8 @@ def events_of(mid, specs, drums_only=False):
         for n, c, s0, s1 in raw_notes(mid, int(tr) - 1):
             if want is not None and c != want:
                 continue
-            if (c == DRUM_CH) != drums_only:
+            # naming channel 10 explicitly means "use it as notes"
+            if want != DRUM_CH and (c == DRUM_CH) != drums_only:
                 continue
             out.append((n, s0, s1))
     return sorted(out, key=lambda e: e[1])
@@ -139,8 +140,11 @@ def family(prog):
         return "?"
     if 32 <= prog <= 39:
         return "bass"
-    if 80 <= prog <= 87 or 72 <= prog <= 79 or 64 <= prog <= 71:
-        return "lead"                    # synth lead, pipe, reed
+    if (80 <= prog <= 87 or 72 <= prog <= 79 or 64 <= prog <= 71
+            or 8 <= prog <= 15):
+        return "lead"        # synth lead, pipe, reed, and tuned percussion
+                             # (glockenspiel/marimba/xylophone/music box),
+                             # which carries the tune in most game rips
     if 56 <= prog <= 63 or 24 <= prog <= 31 or 0 <= prog <= 7:
         return "melodic"                 # brass, guitar, piano
     if 48 <= prog <= 55 or 88 <= prog <= 95 or 40 <= prog <= 47:
@@ -234,6 +238,17 @@ def auto_pick(mid, start=0.0, end=0.0):
               ", ".join(f"{x.spec} prog {x.prog}" for x in perc) + " as drums)")
     mel = [x for x in st if not x.drum and not x.perc and x.n >= 8]
     if not mel:
+        # some files write their music on channel 10 (bt-pause): if nothing
+        # else carries notes, take the widest-ranging one as the melody
+        cand = [x for x in st if x.n >= 8 and
+                max(x.pitches) - min(x.pitches) >= 12]
+        if cand:
+            mel = [max(cand, key=lambda x: x.ntop)]
+            drums = [x for x in drums if x != mel[0].spec]
+            print(f"  (no melodic channel; {mel[0].spec} is on channel 10 but "
+                  f"spans {max(mel[0].pitches) - min(mel[0].pitches)} semitones, "
+                  f"so playing it as the melody)")
+    if not mel:
         return "", "", "", ",".join(drums)
     span = max(x.last for x in mel) - min(x.first for x in mel) or 1
     cover = lambda x: (x.last - x.first) / span
@@ -245,7 +260,7 @@ def auto_pick(mid, start=0.0, end=0.0):
     # bass), and it is sounding most of the time. The GM instrument label
     # is only a hint: game rips put melodies on "bass" programs.
     def fam_hint(x, want):
-        return {"lead": 1.0, "melodic": 1.0, "other": 0.3, "?": 0.3,
+        return {"lead": 1.0, "melodic": 0.6, "other": 0.2, "?": 0.2,
                 "pad": 0.0, "bass": -0.5}[x.family] if want == "lead" else 0.0
 
     def step_fit(x):
@@ -269,7 +284,7 @@ def auto_pick(mid, start=0.0, end=0.0):
         # melodic lines cost a 5 -> 3 on dbz2bsgt
         return (0.6 * (1.0 - x.poly) + 2.5 * min(x.ntop, 120) / 120
                 + 0.8 * min(x.dens, 6) / 6 + step_fit(x)
-                + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 40
+                + 0.8 * fam_hint(x, "lead") - abs(x.mean - 74) / 40
                 - whole_arrangement(x))
 
     def bass_score(x):
