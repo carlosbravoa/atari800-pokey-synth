@@ -2224,7 +2224,7 @@ text_all:
         .byte 17,0,$00, "----------------------------------------",0
         .byte 17,14,$00," PERCUSSION ",0
         .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
-        .byte 23,5,$00, "SPACE PAUSE  <> SONG  ESC STOP",0
+        .byte 23,0,$00, "SPACE PAUSE  <> SONG  TAB LIST  ESC STOP",0
         .byte $FF
 text_st:
         .byte 2,16,$00, "STEREO",0
@@ -2233,7 +2233,7 @@ text_st:
         .byte 14,15,$00,"DRUM",0
         .byte 14,21,$00,"BASS",0
         .byte 14,27,$00,"HARM",0
-        .byte 14,33,$00,"DRUM",0
+        .byte 14,33,$00,"DRUM2",0
         .byte $FF
 .ifdef DISK
 .macro M7 str, col               ; a 20-cell mode-7 line, in one color

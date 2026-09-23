@@ -155,7 +155,8 @@ Three more picker lessons, all confirmed on the machine:
 
 | file | rating | notes |
 |---|---|---|
-| dbztheme | 10/5 ("I loved it") after the fix; before: "missing the main voice" | the vocal (1:1, monophonic, stepwise, sound-effect program, enters at 21 s) lost the lead to a synth riff that is 77% chords (1:2). New rule: a chordy lead gives way to a single-note line in the singer's register; the chords move to voice 4 (POKEY1 ch3). Also changed gtgm (organ chords 8:6 -> guitar line 5:3): needs a listen |
+| dbztheme | 10/5 ("I loved it") after the fix; before: "missing the main voice" | the vocal (1:1, monophonic, stepwise, sound-effect program, enters at 21 s) lost the lead to a synth riff that is 77% chords (1:2). New rule: a chordy lead gives way to a single-note line in the singer's register; the chords move to voice 4 (POKEY1 ch3). Also changed gtgm (organ chords 8:6 -> guitar line 5:3) |
+| gtgm | "sounds awesome now" (was 4) | the guitar line as lead, the organ chords on voice 4: the vocal-line rule helped here too |
 
 15. A singer's line is strictly one note at a time, stepwise, around midi
     62-82. When the best-scoring lead is mostly chords and such a line
