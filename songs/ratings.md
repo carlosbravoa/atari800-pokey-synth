@@ -132,3 +132,21 @@ Three more picker lessons, all confirmed on the machine:
 | vanlake | skipped | lead fixed to the xylophone line (tuned percussion = lead family) |
 | ng2_act | 5 | single-part file, doubled + echoed |
 | bt-pause | moved on | percussion-only file: now converts as a drums-only sequence instead of failing |
+| dbz2bvt | 5 | 888 drum hits in 50 s |
+| x-japan_weekend | 3 | real song, very dense; vocal+riff merged as lead; "complex song, move on" |
+
+### Round 4 lessons
+
+10. **Tuned percussion is a lead instrument** (glockenspiel, marimba,
+    xylophone, music box): in game rips it usually carries the tune
+    (vanlake). Lead-family instruments now outrank other melodic ones.
+11. **Few pitches alone doesn't mean percussion**: a power-chord guitar
+    riff uses three (x-japan_weekend). A sound-effect program is the
+    reliable sign; an ordinary instrument must also be hammering (>= 8/s).
+12. **A percussion-only file** converts to a drums-only sequence
+    (bt-pause) instead of failing or being played as a melody.
+13. **The harmony voice is 8-bit**: ~11 cents at B4, 22 in octave 5, 33 in
+    octave 6. A high harmony is dropped an octave so it can be in tune.
+14. **The Atari's stream clock is 16-bit** (~18 minutes). pcplay now zeroes
+    it at the start, or a long song crosses the wrap and the events land in
+    the past - that was the "buffer dying" on a 5:39 song.

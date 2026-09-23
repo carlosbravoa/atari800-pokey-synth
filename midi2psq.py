@@ -193,9 +193,12 @@ class Stat:
         # percussion written on an ordinary channel (NES/arcade rips do
         # this): a sound-effect program, or a couple of pitches hammered
         # fast. Melodically it is noise, so keep it out of the parts.
+        # A sound-effect program is the reliable sign. Few pitches alone is
+        # not: a power-chord guitar riff also uses three (x-japan_weekend),
+        # so an ordinary instrument has to be hammering to qualify.
         self.perc = (not self.drum and
                      ((self.prog is not None and self.prog >= 120) or
-                      (len(self.pitches) <= 6 and self.dens > 5)))
+                      (len(self.pitches) <= 4 and self.dens >= 8)))
 
 
 def channel_stats(mid, start=0.0, end=0.0):
@@ -465,6 +468,9 @@ def main():
     ap.add_argument("--echo", type=int, default=7,
                     help="frames of delay for the echo voice when a file has "
                          "only one part (default 7 = ~0.12 s)")
+    ap.add_argument("--no-drop", action="store_true",
+                    help="keep the harmony at its written octave even if it "
+                         "sits above the 8-bit voice's accurate range")
     ap.add_argument("--no-double", action="store_true",
                     help="leave a single-part file as one voice")
     a = ap.parse_args()
@@ -507,6 +513,15 @@ def main():
 
     for k in parts:
         parts[k], _ = fit_range(parts[k], k, a.transpose)
+    # The harmony plays on POKEY2's 8-bit voice, whose pitch resolution
+    # coarsens with height: ~11 cents at B4, 22 in octave 5, 33 in octave 6.
+    # Drop it by octaves until it sits where it can be in tune.
+    while (parts["harm"] and not a.no_drop
+           and sum(n for n, _, _ in parts["harm"]) / len(parts["harm"]) > 62
+           and min(n for n, _, _ in parts["harm"]) - 12 >= LOW):
+        parts["harm"] = [(n - 12, s0, s1) for n, s0, s1 in parts["harm"]]
+        print("  harmony dropped an octave (the 8-bit voice drifts sharp "
+              "above B4)")
     coverage_check(parts, drums, (a.end or mid.length) - a.start)
 
     # A file with only one usable part leaves both POKEY2 voices idle. Use

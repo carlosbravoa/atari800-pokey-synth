@@ -51,7 +51,15 @@ def play(path, loop=False, lead=LEAD, quiet=False, watch=None):
         l.poke(lf.LCMD, bytes([4]))
         time.sleep(0.1)
         l.poke(SHEAD, bytes([0, 0]))            # head = tail = 0
+        # SFRAME is 16 bits and the machine may have been up for hours:
+        # base + song length would cross the wrap and the events would land
+        # in the past. Zero it while the stream is off (nothing reads it).
+        l.poke(SFRAME, bytes([0, 0]))
         base = int.from_bytes(lf.peek(l, SFRAME, 2), "little") + lead
+        span_total = (cmds[-1][0] if cmds else 0) + lead + 120
+        if span_total > 60000:
+            print(f"  note: {span_total} frames is close to the 65535-frame "
+                  f"clock wrap; play it in sections if it stumbles")
         span = cmds[-1][0] + 1 if cmds else 1
 
         def frame_now():
