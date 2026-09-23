@@ -111,3 +111,13 @@ Three more picker lessons, all confirmed on the machine:
    mapped by pitch order (battletoads_turbo 1-2 -> 4).
 9. **A wide range with a low centre is a whole arrangement**, not a tune:
    its top line mixes melody with accompaniment.
+
+### Round 3
+
+| file | rating | notes |
+|---|---|---|
+| DonutPlains | 5 | |
+| Revontulet | 5 | dense: 1067 notes + 454 hits |
+| KoopaTroopaBeach | 5 | |
+| dbz3batt | skipped | conversion fine, source poor (per Carlos) |
+| temp | 5 | single-part file: doubled an octave down + echoed on POKEY2 for stereo |

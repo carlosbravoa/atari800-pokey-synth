@@ -187,6 +187,9 @@ python3 pcplay.py songs/kalinka.psq
   tracks. Several parts feeding one voice mask by priority (`overlay`), so
   an arrangement that hands the tune over stays whole. This reuses
   `tools/midi2pokey.py` (skill `atari-music`).
+- **A file with only one usable part** gets the two idle POKEY2 voices: an
+  octave-down double for body and a ~0.12 s echo for width (`--echo N`,
+  `--no-double`). A bare solo then sounds stereo.
 - Range: MIDI 24-119 (C1-B8). A part outside it is transposed by whole
   octaves, and stragglers are dropped, both reported.
 - Drums: GM percussion (channel 10) mapped onto the 8 pads (`GM_DRUM`);

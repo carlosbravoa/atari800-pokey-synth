@@ -458,6 +458,11 @@ def main():
     ap.add_argument("--start", type=float, default=0.0, help="skip to this second")
     ap.add_argument("--end", type=float, default=0.0)
     ap.add_argument("--title", default="")
+    ap.add_argument("--echo", type=int, default=7,
+                    help="frames of delay for the echo voice when a file has "
+                         "only one part (default 7 = ~0.12 s)")
+    ap.add_argument("--no-double", action="store_true",
+                    help="leave a single-part file as one voice")
     a = ap.parse_args()
 
     mid = mido.MidiFile(a.midi)
@@ -497,6 +502,19 @@ def main():
     for k in parts:
         parts[k], _ = fit_range(parts[k], k, a.transpose)
     coverage_check(parts, drums, (a.end or mid.length) - a.start)
+
+    # A file with only one usable part leaves both POKEY2 voices idle. Use
+    # them: an octave-down double for body and a short delayed echo for
+    # width, which turns a bare solo into something stereo.
+    if parts["lead"] and not parts["bass"] and not parts["harm"] and not a.no_double:
+        lead_ev = parts["lead"]
+        parts["bass"] = [(n - 12, s0, s1) for n, s0, s1 in lead_ev if n - 12 >= LOW]
+        d = a.echo / FPS
+        parts["harm"] = [(n, s0 + d, s1 + d) for n, s0, s1 in lead_ev]
+        a.preset_bass = a.preset_lead
+        a.preset_harm = "FLUTE"
+        print(f"  only one part in the file: doubling it an octave down and "
+              f"echoing it {a.echo} frames later on POKEY2")
 
     # A part that repeats one pitch (or nearly) has to be played on a
     # percussive sound: on a sustaining preset each repeat merges into the
