@@ -183,16 +183,41 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   (pitch compressed: C1 ~2 cycles across, x1.41 per octave) and amplitude
   `sc_lvl[AUDC volume]`, plus drum noise; 80 samples, vertical runs between
   samples. Double-buffered at SCOPEA $1800 / SCOPEB $1C00 (the DL's LMS
-  high byte flips), one trace per 4 frames: clear, then three thirds.
+  high byte flips), one trace per 5 frames: clear, then four quarters.
   Runs of 3+ rows go through `sc_col`, an unrolled per-row OR routine
   entered at row lo with an RTS patched in after row hi; `sc_flip` retargets
   its 48 operands to the other buffer (bit 2 of the high byte).
+- **Frame budget, measured on DBZ THEME** (4 parts, 2700 drum hits, the
+  heaviest VBI): one trace per 5 frames (clear + 4 x 20 samples) and
+  silent voices patched out of the sample loop (`scb0-3`) leave ~3
+  dropped panel frames per 40 s there, 0 on the other songs. Music runs in
+  the VBI and never drops; the progress bar follows SPOS, not main passes.
 - **Frame budget**: the panel must fit one frame. Meters redraw only changed
   cells and half the bars per frame. DRAWN $0BC1 counts main-loop passes:
   it must advance exactly with RTCLOK (`hwplayer.py` checks it; 0 dropped
   on KALINKA). py65's worst draw_all is ~13.5k cycles.
   In mono the right-hand meters are dead and column 2 reads VOICE.
-- **Keys**: SPACE pause, `<` `>` song, RETURN replay, ESC stop, 1-9 pick.
+- **Voice 4** (stereo, player only): psq track 3 plays on POKEY1 ch3 (the
+  lead's layer channel) through the engine's `lv_go` entry (lv_step's
+  renderer without its routing), block X = V3X $84 -> $0BC4-$0BD7. Player
+  commands 14/15/16 (on/off/preset). It takes ch3 only once its song plays
+  a track-3 note (`v3on`), so the layer keeps working in other songs; the
+  panel's column 1 then reads VOICE. Mono drops track 3, and so does the
+  synth's stream player.
+- **Keys**: SPACE pause, `<` `>` song, RETURN replay, ESC stop, 1-9 pick,
+  L/TAB song list. **The board sends PC arrow keys to joystick 1**
+  (STICK0 $0278 goes $0D while Down is held), not to KBCODE, so arrow
+  navigation reads STICK0 (`read_stick`); remote tests press HID 0x51 and
+  watch STICK0.
+- **Song list** (CODE2): 24 GR.0 lines drawn into SCOPEA (the scope is
+  hidden then, `scope_init` clears it on close), its own display list with
+  one DLI for white-on-black. 20 songs a screen (`ltop`, `lsel`), the
+  playing one marked `>`, the highlighted one inverse. Held keys repeat in
+  the list only. The panel isn't drawn while it's up; a song that ends
+  still rolls on (the marker moves), and a disk load returns to the list.
+- **Memory**: MAIN $2000-$3BFF is full in the disk build (~40 bytes
+  free). CODE2 $1400-$17FF (a fourth .xex segment: song list, cat_ptr,
+  read_stick), variables $1100-$13FF (bss, zeroed at start), LSCR $1000.
 - **Page 6**: PLAYING $0644 SONGN $0645 NSONG $0646 SEVN $0647 (events,
   liveness) PAUSED $0648 SPTR $0656 DWAIT $0658 SPOS $065A (frames) SECS
   $065C MINS $0661 DRT $0662 (8 LED timers). Hot-swap slots as the synth.

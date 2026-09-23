@@ -110,19 +110,37 @@ for i, name in enumerate(DISK_SONGS):
     for _ in range(300):
         call(L("seq_step"))
     h, ev = psq.read(name)
-    cmds, _ = psq.to_commands(ev, stereo=1)
-    want = {}
-    for f, c, a in cmds:
-        if f < 300:
-            want[c] = want.get(c, 0) + 1
+    want = {}                            # the player's own mapping: tracks
+    for f, op, t, a in ev:               #  0-3, drum channels 0-1
+        if f < 300 and op in (0, 2):
+            k = ("n", t) if op == 0 else ("d",)
+            want[k] = want.get(k, 0) + 1
     got = (mem[PAGE6["NOTECNT"]], mem[PAGE6["NOTE2CNT"]], mem[PAGE6["NOTE3CNT"]],
            mem[PAGE6["DRUMCNT"]])
-    exp = tuple(x & 255 for x in (want.get(0, 0), want.get(2, 0), want.get(4, 0),
-                                  want.get(6, 0) + want.get(7, 0)))
+    exp = tuple(x & 255 for x in (want.get(("n", 0), 0), want.get(("n", 1), 0),
+                                  want.get(("n", 2), 0) + want.get(("n", 3), 0),
+                                  want.get(("d",), 0)))
     if not same or got != exp:
         bad.append((name, same, got, exp))
 check(not bad, f"all {len(DISK_SONGS)} songs load byte-exact and play their first 5 s"
       + (f": {bad}" if bad else ""))
+
+# ---- voice 4: a four-part song drives POKEY1 ch3 --------------------------
+four = [i for i, p in enumerate(DISK_SONGS) if psq.read(p)[0]["tracks"] == 4]
+check(four, f"the album has four-part songs: {[DISK_SONGS[i].split('/')[-1] for i in four]}")
+i = four[0]
+call(L("song_load"), a=i)
+mem[L("n4cnt")] = 0
+h, ev = psq.read(DISK_SONGS[i])
+first = min(f for f, op, t, a in ev if op == 0 and t == 3)
+peak = 0
+for _ in range(first + 120):
+    call(L("vbi"))
+    peak = max(peak, mem[0x0B78 + 5] & 15)
+n4 = sum(1 for f, op, t, a in ev if op == 0 and t == 3 and f < first + 120)
+check(mem[L("v3on")] == 1 and mem[L("n4cnt")] == n4 & 255,
+      f"voice 4 plays its notes ({mem[L('n4cnt')]} of {n4})")
+check(peak > 0, f"POKEY1 ch3 sounds for it (AUDC3 volume up to {peak})")
 
 # ---- the LOADING screen covers every read, then gives the panel back ----
 def m7(line):
@@ -156,6 +174,40 @@ check("LOADING" in lines[0] and lines[1].strip() and "SONG 02 OF" in lines[3],
 bar = mem[0x1000 + 40:0x1000 + 60]
 check(all(b == (6 | 0xC0) for b in bar), "the bar is full when the song has loaded")
 check((mem[0x0230] | mem[0x0231] << 8) == L("dlist"), "the panel is back afterwards")
+
+# ---- the song list: page through all the songs, pick one from disk ------
+KEYS = dict(L=0x00, DOWN=0x0F, RIGHT=0x07, RET=0x0C, ESC=0x1C)
+
+
+def press(k):
+    mem[0xD20F] = 0xFB
+    mem[0xD209] = KEYS[k]
+    call(L("read_keys"))
+    mem[0xD20F] = 0xFF
+    call(L("read_keys"))
+
+
+def lrow(r):
+    b = L("dlist_list")  # (just to be sure it exists)
+    base = 0x1800 + r * 40
+    return "".join(chr(32 + (c & 0x3F)) for c in mem[base:base + 40])
+
+
+n = len(DISK_SONGS)
+call(L("song_load"), a=0)
+press("L")
+check(mem[L("liston")] == 1 and f"OF {n}" in lrow(0), f"the list opens: {lrow(0).strip()!r}")
+press("RIGHT")
+check(mem[L("lsel")] == 20 and mem[L("ltop")] <= 20 <= mem[L("ltop")] + 19, "a page down: song 21 on screen")
+press("RIGHT")
+check(mem[L("lsel")] == n - 1 and mem[L("ltop")] == n - 20, f"another: the last song, window {mem[L('ltop')] + 1}-{mem[L('ltop')] + 20}")
+check(f"{n:02d}" in lrow(21), f"row 21 shows song {n}: {lrow(21).strip()!r}")
+dl_at_read.clear()
+press("RET")
+check(mem[PAGE6["SONGN"]] == n - 1 and mem[PAGE6["PLAYING"]] == 1 and mem[L("liston")] == 0,
+      f"RETURN loads song {n} from disk and plays it")
+check(dl_at_read and all(a == L("dlist_load") for a in dl_at_read), "behind the LOADING screen")
+check((mem[0x0230] | mem[0x0231] << 8) == L("dlist"), "then the panel")
 
 # ---- a bad disk: the catalog read fails -> no songs, no crash -------------
 disk = bytes(3 * SS)                     # only the boot sectors exist

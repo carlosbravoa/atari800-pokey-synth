@@ -50,6 +50,7 @@ mem[0xE45C] = 0x60                      # SETVBV -> rts
 mem[0xE462] = 0x60                      # XITVBV -> rts
 mem[0xD20F] = 0xFF                      # SKSTAT: no key held
 mem[0xD20A] = 0x77                      # RANDOM (mono: it freezes)
+mem[0x0278] = 0x0F                      # STICK0 centred
 SENT = 0xFFF0
 mem[SENT] = 0xEA
 
@@ -168,17 +169,19 @@ check(mem[L("vupk")] > 0 or mem[L("vupk") + 3] > 0, "peak hold is tracking")
 check(mem[L("SECS")] > 0 or mem[L("MINS")] > 0, "the clock is running")
 mem[L("pstep")], mem[L("pstep") + 1] = 2, 0      # a cell every 2 frames
 mem[L("pacc")] = mem[L("pacc") + 1] = 0
-for _ in range(12):
-    call("draw_prog")
+before = mem[0x4000 + 3 * 40:0x4000 + 3 * 40 + 40].count(0x80)
+mem[L("lastsp")] = mem[L("SPOS")]            # the song moves 12 frames on
+mem[L("SPOS")] = (mem[L("SPOS")] + 12) & 255
+call("draw_prog")
 row3 = mem[0x4000 + 3 * 40:0x4000 + 3 * 40 + 40]
-check(row3.count(0x80) == 6 and L("G_OFF") in row3,
-      f"progress bar advanced {row3.count(0x80)} cells of 40")
+check(row3.count(0x80) - before == 6 and L("G_OFF") in row3,
+      f"progress bar advanced {row3.count(0x80) - before} cells for 12 frames at 2 a cell")
 
 print("\n== oscilloscope ==")
 dl = L("scope_lms")
 shown = mem[dl + 2]
 cyc = []
-for _ in range(4):                      # clear, then three thirds + swap
+for _ in range(5):                      # clear, then four quarters + swap
     c0 = m.processorCycles
     call("draw_all")
     cyc.append(m.processorCycles - c0)
@@ -233,6 +236,54 @@ call("read_keys")
 check(mem[L("PAUSED")] == 0, "SPACE resumes")
 mem[0xD20F] = 0xFF
 call("read_keys")
+
+print("\n== song list ==")
+def press(code):
+    mem[0xD20F] = 0xFB
+    mem[0xD209] = code
+    call("read_keys")
+    mem[0xD20F] = 0xFF
+    call("read_keys")
+
+
+def lrow(r):
+    base = L("LISTSCR") + r * 40
+    return "".join(chr(32 + (c & 0x3F)) for c in mem[base:base + 40])
+
+
+playing = mem[L("SONGN")]
+press(L("K_L"))
+check(mem[L("liston")] == 1 and (mem[0x0230] | mem[0x0231] << 8) == L("dlist_list"),
+      "L opens the song list")
+check("SONG LIST" in lrow(0) and f"OF {NS:02d}" in lrow(0), f"header: {lrow(0).strip()!r}")
+rows = [lrow(r) for r in range(2, 2 + NS)]
+check(all(f"{i + 1:02d}" in rows[i] for i in range(NS)), "every song is numbered")
+check("ANTHEM" in rows[0] and "01:23" in rows[0], f"titles and lengths: {rows[0].strip()!r}")
+check(rows[playing][1] == ">", "the playing song is marked")
+inv = lambda r: all(c & 0x80 for c in mem[L("LISTSCR") + r * 40:L("LISTSCR") + r * 40 + 40])
+check(inv(2 + playing), "the playing song starts highlighted")
+press(L("K_DOWN"))
+press(L("K_DOWN"))
+check(mem[L("lsel")] == playing + 2 and inv(4 + playing) and not inv(2 + playing),
+      "down moves the highlight")
+mem[0x0278] = 0x0E                      # joystick / PC arrow up
+call("read_stick")
+mem[0x0278] = 0x0F
+call("read_stick")
+check(mem[L("lsel")] == playing + 1, "the joystick (PC arrows) moves it too")
+mem[0x0278] = 0x0D
+call("read_stick")
+mem[0x0278] = 0x0F
+call("read_stick")
+press(L("K_RET"))
+check(mem[L("liston")] == 0 and mem[L("SONGN")] == playing + 2 and mem[L("PLAYING")] == 1,
+      f"RETURN plays song {mem[L('SONGN')] + 1} and closes the list")
+check((mem[0x0230] | mem[0x0231] << 8) == L("dlist"), "the panel is back")
+press(L("K_TAB"))
+press(L("K_RIGHT"))
+check(mem[L("lsel")] == NS - 1, "a page down stops on the last song")
+press(L("K_ESC"))
+check(mem[L("liston")] == 0 and mem[L("SONGN")] == playing + 2, "ESC closes it and the song plays on")
 
 print("\n== end of song rolls on to the next ==")
 last = NS - 1                           # SMB 1-09: the short one, last

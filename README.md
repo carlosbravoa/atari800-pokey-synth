@@ -38,10 +38,13 @@ python3 test_disk.py    # boots the .atr in the emulator and checks every song
 | `RETURN` | play the song again from the start |
 | `ESC` | stop |
 | `1`-`9` | pick a song |
+| `L` or `TAB` | the song list: arrow keys or joystick move (hold to scroll), left/right page, `RETURN` plays, `ESC` goes back |
+| joystick left/right | previous / next song (on the panel) |
 
-When a song ends, the next one starts.
+When a song ends, the next one starts. The music keeps playing while the
+song list is open.
 
-The oscilloscope redraws the mix 15 times a second. POKEY's output can't be
+The oscilloscope redraws the mix 12 times a second. POKEY's output can't be
 read back, so each voice contributes a wave at its pitch and loudness: a sine
 for pure tones, a square for buzzy sounds, and noise for drums. Pitch is
 compressed so every note shows a few cycles.
@@ -106,13 +109,19 @@ Read the coverage map it prints. It shows which tenth of the song each part
 plays, and warns when a part is mostly silent or starts late. That usually
 means the wrong track was picked, so fix it before listening.
 
+On a stereo machine the player has a fourth voice on the lead's layer
+channel. `--voice4 PART` fills it. The converter uses it by itself when a
+song's busiest part is mostly chords and a single-note line exists in the
+singer's register: that line becomes the lead, and the chord part moves to
+the fourth voice. The synth's PC streaming and mono machines skip it.
+
 Useful options:
 
 | Option | Does |
 |---|---|
 | `--start S` / `--end S` | keep only this part of the song, in seconds |
 | `--transpose N` | shift every note by N semitones |
-| `--preset-lead P` (also `-bass`, `-harm`) | choose the instrument: PIANO ORGAN FLUTE STRINGS BASS CHIPARP SYNTH BELL LASER UFO |
+| `--preset-lead P` (also `-bass`, `-harm`, `-voice4`) | choose the instrument: PIANO ORGAN FLUTE STRINGS BASS CHIPARP SYNTH BELL LASER UFO |
 | `--lead 5:4,3:2` | several parts feed one voice. The first one wins when both play |
 | `--no-double`, `--echo N` | control the octave double and echo added to single-part songs |
 

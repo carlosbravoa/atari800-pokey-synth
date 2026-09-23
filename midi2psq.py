@@ -241,7 +241,7 @@ def auto_pick(mid, start=0.0, end=0.0):
               ", ".join(f"{x.spec} prog {x.prog}" for x in perc) + " as drums)")
     mel = [x for x in st if not x.drum and not x.perc and x.n >= 8]
     if not mel:
-        return "", "", "", ",".join(drums)   # percussion-only file
+        return "", "", "", "", ",".join(drums)   # percussion-only file
     span = max(x.last for x in mel) - min(x.first for x in mel) or 1
     cover = lambda x: (x.last - x.first) / span
 
@@ -301,7 +301,19 @@ def auto_pick(mid, start=0.0, end=0.0):
     # (an older rule swapped away from chord channels here; with the score
     # now computed on each candidate's top line that was wrong - it handed
     # the lead to a counter-line in rcr-main)
-    rest = [x for x in mel if x is not lead]
+    # A sung melody: strictly one note at a time, stepwise, in the singer's
+    # register, and a real amount of it. When the lead picked above is
+    # mostly chords (a riff, comping) and such a line exists, the line is
+    # the tune and takes the lead; the chord part is not dropped but moves
+    # to the fourth voice (POKEY1 ch3). dbztheme: the vocal sits on a
+    # sound-effect program (1:1) and lost the lead to the synth riff (1:2).
+    voice4 = None
+    if lead.poly > 0.5:
+        sung = [x for x in high if x is not lead and x.poly < 0.05
+                and 1.0 <= x.step <= 4.0 and 62 <= x.mean <= 82 and x.ntop >= 40]
+        if sung:
+            voice4, lead = lead, max(sung, key=lead_score)
+    rest = [x for x in mel if x is not lead and x is not voice4]
     bass = max(rest, key=bass_score) if rest else None
     rest = [x for x in rest if x is not bass]
     harm = max(rest, key=harm_score) if rest else None
@@ -349,15 +361,18 @@ def auto_pick(mid, start=0.0, end=0.0):
             have += c.iv
         return chosen
 
-    used = {x.spec for x in (lead, bass, harm) if x}
+    used = {x.spec for x in (lead, bass, harm, voice4) if x}
     free = lambda: [x for x in mel if x.spec not in used]
     leads = relay(lead, free()) if lead else []
     used |= {x.spec for x in leads}
+    v4s = relay(voice4, free()) if voice4 else []
+    used |= {x.spec for x in v4s}
     basses = relay(bass, free(), melodic=False) if bass else []
     used |= {x.spec for x in basses}
     harms = relay(harm, free()) if harm else []
-    print("auto-picked parts (override with --lead/--bass/--harm/--drums):")
-    for nm, xs in (("lead", leads), ("bass", basses), ("harmony", harms)):
+    print("auto-picked parts (override with --lead/--bass/--harm/--voice4/--drums):")
+    for nm, xs in (("lead", leads), ("bass", basses), ("harmony", harms),
+                   ("voice4", v4s)):
         for k, x in enumerate(xs):
             print(f"  {(nm if k == 0 else ' + also'):8s} {x.spec:6s} {x.n:4d} notes, "
                   f"midi {x.mean:.0f}, {x.dens:.1f}/s, {int(x.poly * 100):2d}% chords, "
@@ -365,7 +380,7 @@ def auto_pick(mid, start=0.0, end=0.0):
     if drums:
         print(f"  drums    {','.join(drums)}")
     j = lambda xs: ",".join(x.spec for x in xs)
-    return j(leads), j(basses), j(harms), ",".join(drums)
+    return j(leads), j(basses), j(harms), j(v4s), ",".join(drums)
 
 
 def coverage_check(parts, drums, length):
@@ -373,10 +388,11 @@ def coverage_check(parts, drums, length):
     song each part actually plays, and where the long silences are"""
     print("coverage (bars of 10% of the song, # = playing):")
     bad = []
-    for name in ("lead", "bass", "harm"):
+    for name in ("lead", "bass", "harm", "v4"):
         ev = parts[name]
         if not ev:
-            print(f"  {name:5s} -  (not used)")
+            if name != "v4":
+                print(f"  {name:5s} -  (not used)")
             continue
         bins = [0] * 10
         for _, s0, s1 in ev:
@@ -454,6 +470,9 @@ def main():
                          "comma separated (earlier ones mask later ones)")
     ap.add_argument("--bass", default="")
     ap.add_argument("--harm", default="", help="a third voice (stereo only)")
+    ap.add_argument("--voice4", default="",
+                    help="a fourth voice on POKEY1 ch3 (stereo, POKEY PLAYER only; "
+                         "the synth's stream player ignores it)")
     ap.add_argument("--harm-second", action="store_true",
                     help="take the harmony as the 2nd note of chords "
                          "(when --harm points at the same tracks as --lead)")
@@ -461,6 +480,7 @@ def main():
     ap.add_argument("--preset-lead", default="ORGAN")
     ap.add_argument("--preset-bass", default="BASS")
     ap.add_argument("--preset-harm", default="STRINGS")
+    ap.add_argument("--preset-voice4", default="ORGAN")
     ap.add_argument("--transpose", type=int, default=0)
     ap.add_argument("--start", type=float, default=0.0, help="skip to this second")
     ap.add_argument("--end", type=float, default=0.0)
@@ -480,7 +500,7 @@ def main():
         inspect(mid)
         return
     if not (a.lead or a.bass):                 # nothing chosen: choose for them
-        a.lead, a.bass, a.harm, a.drums = auto_pick(mid, a.start, a.end)
+        a.lead, a.bass, a.harm, a.voice4, a.drums = auto_pick(mid, a.start, a.end)
         if not a.lead and not a.drums:
             sys.exit("nothing to play; use --inspect and pick by hand")
         if not a.lead:
@@ -489,7 +509,7 @@ def main():
     nums = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     parts = {}
     for name, sel, which in (("lead", a.lead, "high"), ("bass", a.bass, "low"),
-                             ("harm", a.harm, "high")):
+                             ("harm", a.harm, "high"), ("v4", a.voice4, "high")):
         parts[name] = part(mid, nums(sel), which,
                            second=(name == "harm" and a.harm_second)) if sel else []
     # channel 10 normally, but a rip may put its drums on an ordinary
@@ -516,12 +536,14 @@ def main():
     # The harmony plays on POKEY2's 8-bit voice, whose pitch resolution
     # coarsens with height: ~11 cents at B4, 22 in octave 5, 33 in octave 6.
     # Drop it by octaves until it sits where it can be in tune.
-    while (parts["harm"] and not a.no_drop
-           and sum(n for n, _, _ in parts["harm"]) / len(parts["harm"]) > 62
-           and min(n for n, _, _ in parts["harm"]) - 12 >= LOW):
-        parts["harm"] = [(n - 12, s0, s1) for n, s0, s1 in parts["harm"]]
-        print("  harmony dropped an octave (the 8-bit voice drifts sharp "
-              "above B4)")
+    # (voice 4 is 8-bit too, on POKEY1 ch3: same rule)
+    for k, label in (("harm", "harmony"), ("v4", "voice 4")):
+        while (parts[k] and not a.no_drop
+               and sum(n for n, _, _ in parts[k]) / len(parts[k]) > 62
+               and min(n for n, _, _ in parts[k]) - 12 >= LOW):
+            parts[k] = [(n - 12, s0, s1) for n, s0, s1 in parts[k]]
+            print(f"  {label} dropped an octave (the 8-bit voice drifts sharp "
+                  "above B4)")
     coverage_check(parts, drums, (a.end or mid.length) - a.start)
 
     # A file with only one usable part leaves both POKEY2 voices idle. Use
@@ -555,17 +577,21 @@ def main():
         a.preset_lead = auto_preset(parts["lead"], "ORGAN")
     if a.preset_harm == "STRINGS":
         a.preset_harm = auto_preset(parts["harm"], "STRINGS")
+    if a.preset_voice4 == "ORGAN":
+        a.preset_voice4 = auto_preset(parts["v4"], "ORGAN")
     print(f"  sounds: lead {a.preset_lead}, bass {a.preset_bass}, "
-          f"harmony {a.preset_harm}")
+          f"harmony {a.preset_harm}" +
+          (f", voice 4 {a.preset_voice4}" if parts["v4"] else ""))
 
-    stereo = bool(parts["harm"])
+    stereo = bool(parts["harm"] or parts["v4"])
     title = a.title or os.path.basename(a.midi).rsplit(".", 1)[0]
     w = psq.Writer(title, mode=psq.STEREO if stereo else psq.EITHER,
-                   tracks=3 if stereo else 2, drums=1)
+                   tracks=4 if parts["v4"] else 3 if stereo else 2, drums=1)
     counts = {
         "lead": add_part(w, 0, parts["lead"], a.preset_lead, start_frame),
         "bass": add_part(w, 1, parts["bass"], a.preset_bass, start_frame),
         "harm": add_part(w, 2, parts["harm"], a.preset_harm, start_frame),
+        "v4": add_part(w, 3, parts["v4"], a.preset_voice4, start_frame),
     }
     hits, unknown = 0, set()
     gm = gm_drums                            #  pitches mean nothing there
@@ -591,8 +617,9 @@ def main():
     w.save(out)
     h, ev = psq.read(out)
     print(f"{out}: {psq.describe(h, ev)}")
-    print(f"  lead {counts['lead']}, bass {counts['bass']}, harmony {counts['harm']} notes, "
-          f"{hits} drum hits, {os.path.getsize(out)} bytes")
+    print(f"  lead {counts['lead']}, bass {counts['bass']}, harmony {counts['harm']}"
+          + (f", voice 4 {counts['v4']}" if counts["v4"] else "")
+          + f" notes, {hits} drum hits, {os.path.getsize(out)} bytes")
 
 
 if __name__ == "__main__":

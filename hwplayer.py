@@ -7,6 +7,8 @@ sys.path.insert(0, "/home/carlos/devel/fpga/atari800_tang_nano20k_parallel/tools
 from atari_link import AtariLink
 
 NEXT, PREV, SPACE, RET, ESC = 0x2E, 0x2D, 0x2C, 0x28, 0x29
+KEY_L, DOWN, TAB = 0x0F, 0x51, 0x2B
+lbl = {ln.split()[2].lstrip("."): int(ln.split()[1], 16) for ln in open("build/player.lbl")}
 ok = True
 
 
@@ -42,6 +44,23 @@ with AtariLink() as l:
     check(a[4] == 0 and pos(b) > pos(a), "SPACE resumes")
     l.key(RET, hold_ms=80); time.sleep(0.5)
     check(pos(st()) < 60, f"RETURN replays from the top (SPOS {pos(st())})")
+    # the song list: L opens it, down twice, RETURN plays that song
+    n0 = st()[1]
+    l.key(KEY_L, hold_ms=80); time.sleep(0.6)
+    on = l.peek(lbl["liston"], 1)[0]
+    head = bytes(l.peek(0x1800, 40))            # LISTSCR = SCOPEA
+    text = "".join(chr(32 + (c & 0x3F)) for c in head)
+    check(on == 1 and "SONG LIST" in text, f"L opens the song list: {text.strip()!r}")
+    for _ in range(2):
+        l.key(DOWN, hold_ms=80); time.sleep(0.5)
+    sel = l.peek(lbl["lsel"], 1)[0]
+    check(sel == min(n0 + 2, st()[2] - 1), f"down arrows move the highlight to song {sel + 1}")
+    l.key(RET, hold_ms=80); time.sleep(0.8)
+    s2 = st()
+    check(s2[1] == sel and l.peek(lbl["liston"], 1)[0] == 0, f"RETURN plays song {s2[1] + 1}, back to the panel")
+    l.key(TAB, hold_ms=80); time.sleep(0.5)
+    l.key(ESC, hold_ms=80); time.sleep(0.5)
+    check(l.peek(lbl["liston"], 1)[0] == 0 and st()[1] == sel, "TAB opens it, ESC closes it, the song plays on")
     # the panel (meters + scope) must keep up: one main-loop pass per frame
     f0 = l.peek(0x12, 3); d0 = l.peek(0x0BC1, 1)[0]
     time.sleep(4)

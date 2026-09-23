@@ -10,7 +10,7 @@ FILE FORMAT
   header, 32 bytes
     0-3   b"PSQ1"
     4     mode: 0 mono, 1 stereo, 2 either (see TRACK LAYOUT)
-    5     melodic tracks used (1-3)
+    5     melodic tracks used (1-4)
     6     drum channels used (1-2)
     7     tick rate, frames per second (60 = NTSC; informational)
     8-9   total length in frames, little endian (informational)
@@ -43,6 +43,9 @@ TRACK LAYOUT (what the Atari can actually sound at once)
                    drums 0 -> POKEY1 ch4, drums 1 -> POKEY2 ch4
   A stereo file played on a mono machine drops track 2 and folds drums 1
   into drums 0; the player says so. Mode 2 means the file already fits both.
+  track 3 -> voice 4 on POKEY1 ch3 (the lead's layer channel), POKEY
+                   PLAYER only, stereo only. The synth's stream player and
+                   mono machines drop it.
 
 Each track is monophonic, so chords need one track per note (or the synth's
 own held-chord mode via PARAM CHORD/CHDSPD on the lead).

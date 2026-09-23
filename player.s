@@ -68,6 +68,8 @@ NBAR     = 6            ; voice meters
 BARTOP   = 5            ; first meter row
 BARROWS  = 9
 
+V3X      = $84          ; voice 4's block: VB + $84 = $0BC4-$0BD7 (free RAM),
+                        ;  played on POKEY1 ch3 (the layer's channel)
 SCOPEA   = $1800        ; oscilloscope: two 24-line ANTIC E bitmaps
 SCOPEB   = $1C00        ;  (40 bytes a line), shown alternately
 SCN      = 80           ; samples across (2 pixels each)
@@ -90,6 +92,10 @@ PLVL     = $9C
 PPK      = $9D
 PCOL     = $9E
 SCV      = $A0          ; 2: the scope's column-routine entry (jmp indirect)
+CPTR     = $A2          ; 2: a catalog entry (cat_ptr)
+K_L      = $00          ; L: the song list (TAB too)
+LISTSCR  = SCOPEA       ; the song list's screen (the scope is hidden then)
+LROWS    = 20           ; songs on screen at once
 
 ; ===========================================================================
 .segment "XEXHDR"
@@ -109,6 +115,11 @@ SCV      = $A0          ; 2: the scope's column-routine entry (jmp indirect)
         .word __SONG_START__
         .word __SONG_LAST__-1
 .endif
+
+.segment "XEXHDR4"
+.import __LOW2_START__, __LOW2_LAST__
+        .word __LOW2_START__
+        .word __LOW2_LAST__-1
 
 .segment "XEXTRL"
         .word $02E0, $02E1
@@ -189,6 +200,18 @@ start:
         sta CH
 
         jsr init_chset
+        lda #>$1100             ; the variables ($1100-$13FF, not in the file)
+        sta PT2
+        lda #0
+        sta PT1
+        tay
+        ldx #3
+@zv:    sta (PT1),y
+        iny
+        bne @zv
+        inc PT2
+        dex
+        bne @zv
         lda #0                  ; page-6 state up to the trampoline
         ldx #$7B
 @z6:    sta $0600,x
@@ -216,8 +239,8 @@ start:
 @vz:    sta VB,x
         dex
         bpl @vz
-        ldx #$27                ; $0B98-$0BBF: the synth's old song vars
-        lda #0
+        ldx #$47                ; $0B98-$0BDF: the synth's old song vars,
+        lda #0                  ;  then voice 4's block
 @vz2:   sta POLY4B,x
         dex
         bpl @vz2
@@ -281,11 +304,15 @@ mainloop:
         lda PARKREQ
         bne park_self
         jsr read_keys
+        jsr read_stick
         lda PENDN               ; the stream ended: roll on to the next song
         beq @p
         lda #0
         sta PENDN
         jsr next_song
+        lda liston              ; browsing: the list's marker moves on too
+        beq @p
+        jsr list_rows
 @p:     lda PRESREQ             ; the song asked for a lead instrument
         cmp #$FF
         beq @d
@@ -294,8 +321,10 @@ mainloop:
         sta PRESREQ
         pla
         jsr set_preset
-@d:     jsr draw_all
-        jmp mainloop
+@d:     lda liston              ; the panel is hidden while the list is up
+        bne @l
+        jsr draw_all
+@l:     jmp mainloop
 
 park_self:                      ; deploy.py hot-swap: detach and wait
         lda #<RTISTUB
@@ -357,7 +386,13 @@ vbi:
         jsr lv_step
         ldx #0
         jsr lv_step
-        jsr drum_step
+        lda v3on                ; voice 4 owns POKEY1 ch3 once its song uses
+        beq @nv                 ;  it (it overrides the lead's layer there)
+        ldx #V3X
+        ldy #$04
+        lda #0
+        jsr lv_go
+@nv:    jsr drum_step
         jsr pokey_out
         jmp XITVBV
 
@@ -545,6 +580,18 @@ cm_par: tax                     ; 11: param<<4 | value
         jmp seq_next
 cm_off: jsr hush                ; 12
         jmp seq_next
+cm_v3n: ldx #V3X                ; 14: voice 4 note on (POKEY1 ch3)
+        jsr lv_on
+        inc n4cnt
+        lda #1
+        sta v3on
+        jmp seq_next
+cm_v3f: ldx #V3X                ; 15
+        jsr lv_off
+        jmp seq_next
+cm_p3:  ldx #V3X                ; 16: voice 4's instrument
+        jsr lv_load
+        jmp seq_next
 cm_end: lda #0                  ; 13: end of song -> the main thread advances
         sta PLAYING
         lda #1
@@ -565,12 +612,12 @@ seq_next:                       ; one event done: take the next delta
 cmd_lo:     .byte <(cm_non-1),<(cm_nof-1),<(cm_v0n-1),<(cm_v0f-1)
             .byte <(cm_v1n-1),<(cm_v1f-1),<(cm_dr0-1),<(cm_dr1-1)
             .byte <(cm_pre-1),<(cm_p0-1),<(cm_p1-1),<(cm_par-1)
-            .byte <(cm_off-1),<(cm_end-1)
+            .byte <(cm_off-1),<(cm_end-1),<(cm_v3n-1),<(cm_v3f-1),<(cm_p3-1)
 cmd_hi:     .byte >(cm_non-1),>(cm_nof-1),>(cm_v0n-1),>(cm_v0f-1)
             .byte >(cm_v1n-1),>(cm_v1f-1),>(cm_dr0-1),>(cm_dr1-1)
             .byte >(cm_pre-1),>(cm_p0-1),>(cm_p1-1),>(cm_par-1)
-            .byte >(cm_off-1),>(cm_end-1)
-SCMDN = 14
+            .byte >(cm_off-1),>(cm_end-1),>(cm_v3n-1),>(cm_v3f-1),>(cm_p3-1)
+SCMDN = 17
 
 hush:                           ; every voice silent, envelopes reset
         lda #0
@@ -581,6 +628,8 @@ hush:                           ; every voice silent, envelopes reset
         sta V_VHI
         sta V_EST+VBS
         sta V_VHI+VBS
+        sta V_EST+V3X
+        sta V_VHI+V3X
         sta D_TMR
         sta D_TMR+8
         lda #$FF
@@ -605,41 +654,18 @@ song_load:                      ; A = song index
         sta pcell
         sta pacc
         sta pacc+1
+        sta lastsp
         sta ENDF
         sta PENDN
         lda #60
         sta SECTMR
         jsr hush
         jsr clear_meters
-        lda SONGN               ; PSCR = SONGS + 1 + index*24
-        sta PT1
-        lda #0
-        sta PT2
-        asl PT1
-        rol PT2
-        asl PT1
-        rol PT2
-        asl PT1
-        rol PT2                 ; index*8
-        lda PT1
-        sta PT3
-        lda PT2
-        sta PT4
-        asl PT1
-        rol PT2                 ; index*16
-        clc
-        lda PT1
-        adc PT3
-        sta PT1
-        lda PT2
-        adc PT4
-        sta PT2                 ; index*24
-        clc
-        lda PT1
-        adc #<(CAT+1)
+        lda SONGN               ; PSCR = its catalog entry
+        jsr cat_ptr
+        lda CPTR
         sta PSCR
-        lda PT2
-        adc #>(CAT+1)
+        lda CPTR+1
         sta PSCR+1
         ldy #0                  ; title -> row 1 (mode 7, COLPF2)
 @t:     lda (PSCR),y
@@ -708,6 +734,11 @@ song_load:                      ; A = song index
         ldx #VBS
         lda #0
         jsr lv_load
+        ldx #V3X
+        lda #0
+        jsr lv_load
+        lda #0                  ; the layer keeps ch3 until track 3 plays
+        sta v3on
         lda #1                  ; POKEY2 carries its own voices (no mirror)
         sta STREAMON
         jsr sq_delta            ; the stream's first gap
@@ -756,14 +787,34 @@ read_keys:
         lda KBCODE
         and #$3F
         cmp KHELD
-        beq @x
+        beq @held
         sta KHELD
+        lda #0
+        sta khold
+        lda KHELD
+        jmp key_cmd
+@held:  ldx liston              ; in the list a held key repeats
+        beq @x
+        inc khold
+        lda khold
+        cmp #24
+        bcc @x
+        lda #20                 ; ... every 4 frames after 24
+        sta khold
+        lda KHELD
         jmp key_cmd
 @up:    lda #$FF
         sta KHELD
 @x:     rts
 
 key_cmd:                        ; A = a new key press
+        ldx liston
+        beq @panel
+        jmp list_key
+@panel: cmp #K_L
+        beq @list
+        cmp #K_TAB
+        beq @list
         cmp #K_SPACE
         beq @pause
         cmp #K_GT
@@ -786,6 +837,7 @@ key_cmd:                        ; A = a new key press
         jmp song_load
 @next:  jmp next_song
 @prev:  jmp prev_song
+@list:  jmp list_open
 @again: lda SONGN
         jmp song_load
 @stop:  lda #0
@@ -960,9 +1012,15 @@ draw_voices:
         jmp @s0
 @b0:    lda #$FF
 @s0:    sta ncode+0
-        lda STEREO              ; 1 layer (mono: the bass voice lives here)
-        bne @b1
-        lda V_EST
+        lda STEREO              ; 1 layer (mono: the bass voice lives here;
+        beq @m1                 ;  stereo: voice 4 once its song uses it)
+        lda v3on
+        beq @b1
+        lda V_EST+V3X
+        beq @b1
+        lda V_NOTE+V3X
+        jmp @s1
+@m1:    lda V_EST
         beq @b1
         lda V_NOTE
         jmp @s1
@@ -1014,12 +1072,28 @@ draw_voices:
         sta pcode+4
         jmp @cmp
 @ps:    lda #$FF
-        sta pcode+1
+        ldx v3on
+        beq @p1
+        lda V_PRE+V3X
+@p1:    sta pcode+1
         lda V_PRE
         sta pcode+3
         lda V_PRE+VBS
         sta pcode+4
-@cmp:   ldx #NBAR-1
+@cmp:   lda STEREO              ; column 1's label follows what plays there
+        beq @lb
+        lda v3on
+        cmp lastv3
+        beq @lb
+        sta lastv3
+        lda #<text_lyr
+        ldx #>text_lyr
+        ldy v3on
+        beq @pl
+        lda #<text_v4
+        ldx #>text_v4
+@pl:    jsr print_list
+@lb:    ldx #NBAR-1
 @c:     stx PCOL
         lda ncode,x
         cmp lastn,x
@@ -1136,7 +1210,8 @@ put_inst:                       ; X = column, A = $FF none / preset 0-9
 ; voices are doing: each contributes a wave at its pitch (sc_step by note)
 ; and loudness (its AUDC volume), a sine for pure tones and a square for the
 ; poly waves, and a drum adds noise. 80 samples, drawn into the hidden
-; buffer over four frames (15 traces a second, inside the frame budget).
+; buffer over five frames (12 traces a second: four-part songs with busy
+; drums dropped frames at 15).
 .macro SCLEAR buf
         .local @c
         ldx #39
@@ -1178,7 +1253,7 @@ sc_clear:
 @b:     SCLEAR SCOPEB
         rts
 
-draw_scope:                     ; 4 frames a trace: clear, then 3 thirds
+draw_scope:                     ; 5 frames a trace: clear, then 4 quarters
         lda scstage
         bne @run
         jsr sc_clear
@@ -1193,7 +1268,7 @@ draw_scope:                     ; 4 frames a trace: clear, then 3 thirds
         jsr sc_run
         inc scstage
         lda scstage
-        cmp #4
+        cmp #5
         bne @x
         lda scback              ; show it, draw into the other one next
         sta scope_lms+2
@@ -1204,7 +1279,7 @@ draw_scope:                     ; 4 frames a trace: clear, then 3 thirds
         sta scstage
 @x:     rts
 
-sc_ends:    .byte 27, 54, SCN
+sc_ends:    .byte 20, 40, 60, SCN
 
 ; what each voice is doing -> level offsets, steps, shapes (self-modified)
 sc_setup:
@@ -1226,6 +1301,18 @@ sc_setup:
         ldx V_IDX+VBS
         ldy V_PAR+VBS
         jsr sc_voice
+        inc PT4
+        lda v3on                ; 3: voice 4, or the lead's layer
+        beq @lay
+        lda SH+5
+        ldx V_IDX+V3X
+        ldy V_PAR+V3X
+        jsr sc_voice
+        jmp @noise
+@lay:   lda SH+5
+        ldx NOTEIDX
+        ldy P_WAVE
+        jsr sc_voice
         jmp @noise
 @mono:  ldx V_IDX               ; 1: ch3, the loop voice or the lead's layer
         lda V_EST
@@ -1235,7 +1322,12 @@ sc_setup:
         ldy V_PAR
         jsr sc_voice
         inc PT4
-        lda #0                  ; 2: nothing on a mono machine
+        lda #0                  ; 2, 3: nothing on a mono machine
+        tax
+        tay
+        jsr sc_voice
+        inc PT4
+        lda #0
         tax
         tay
         jsr sc_voice
@@ -1260,7 +1352,9 @@ sc_setup:
         sta sm1+2
         lda scshp+2
         sta sm2+2
-        ldx #2
+        lda scshp+3
+        sta sm3+2
+        ldx #3
 @p:     lda scpb,x              ; start where the last trace started, then
         sta scph,x              ;  drift the start so the wave travels
         lda scst,x
@@ -1273,9 +1367,47 @@ sc_setup:
         sta scpb,x
         dex
         bpl @p
+        ldx #3                  ; silent voices: jump over their block
+@k:     lda scof,x
+        bne @on
+        lda #$4C                ; JMP next block
+        sta PT1
+        lda scb_nlo,x
+        sta PT2
+        lda scb_nhi,x
+        jmp @put
+@on:    lda #$AD                ; LDA scph+k
+        sta PT1
+        txa
+        clc
+        adc #<scph
+        sta PT2
+        lda #>scph
+        adc #0
+@put:   sta PT3
+        lda scb_lo,x
+        sta PSCR
+        lda scb_hi,x
+        sta PSCR+1
+        ldy #0
+        lda PT1
+        sta (PSCR),y
+        iny
+        lda PT2
+        sta (PSCR),y
+        iny
+        lda PT3
+        sta (PSCR),y
+        dex
+        bpl @k
         lda #$FF                ; no previous sample yet
         sta scy
         rts
+
+scb_lo:     .byte <scb0,<scb1,<scb2,<scb3
+scb_hi:     .byte >scb0,>scb1,>scb2,>scb3
+scb_nlo:    .byte <scb1,<scb2,<scb3,<scb4
+scb_nhi:    .byte >scb1,>scb2,>scb3,>scb4
 
 sc_voice:                       ; A = AUDC image, X = note, Y = wave, PT4 = voice
         and #$0F
@@ -1305,7 +1437,11 @@ sc_voice:                       ; A = AUDC image, X = note, Y = wave, PT4 = voic
 
 sc_run:                         ; samples scs .. scend-1
 sc_samp:
-        lda scph
+        lda #0
+        sta scsum
+; each voice block starts with "lda scph+k"; sc_setup turns that into a
+; "jmp" to the next block when the voice is silent
+scb0:   lda scph
         clc
         adc scst
         sta scph
@@ -1314,8 +1450,10 @@ sc_samp:
         ora scof
         tax
 sm0:    lda sc_sine,x
+        clc
+        adc scsum
         sta scsum
-        lda scph+1
+scb1:   lda scph+1
         clc
         adc scst+1
         sta scph+1
@@ -1327,7 +1465,7 @@ sm1:    lda sc_sine,x
         clc
         adc scsum
         sta scsum
-        lda scph+2
+scb2:   lda scph+2
         clc
         adc scst+2
         sta scph+2
@@ -1339,6 +1477,19 @@ sm2:    lda sc_sine,x
         clc
         adc scsum
         sta scsum
+scb3:   lda scph+3
+        clc
+        adc scst+3
+        sta scph+3
+        lsr a
+        lsr a
+        ora scof+3
+        tax
+sm3:    lda sc_sine,x
+        clc
+        adc scsum
+        sta scsum
+scb4:
         lda scnm
         beq @nn
         lda RANDOM
@@ -1468,13 +1619,20 @@ sc_flip:
         rts
 
 ; ---- progress bar and clock ----------------------------------------------
-draw_prog:
-        lda PLAYING
+draw_prog:                      ; follows the song's own clock (SPOS), so
+        lda PLAYING             ;  a dropped panel frame can't slow it
         beq @x
-        lda PAUSED
-        bne @x
-        inc pacc
-        bne @chk
+        sec
+        lda SPOS
+        sbc lastsp
+        tax
+        lda SPOS
+        sta lastsp
+        txa
+        clc
+        adc pacc
+        sta pacc
+        bcc @chk
         inc pacc+1
 @chk:   lda pacc+1
         cmp pstep+1
@@ -1768,9 +1926,16 @@ load_screen:                    ; LOADING + empty bar, then show it (the caller
 load_hide:
         lda #0
         sta lshow
+        lda liston              ; back to whichever screen was up
+        bne @l
         lda #<dlist
         sta SDLSTL
         lda #>dlist
+        sta SDLSTL+1
+        rts
+@l:     lda #<dlist_list
+        sta SDLSTL
+        lda #>dlist_list
         sta SDLSTL+1
         rts
 
@@ -2004,9 +2169,10 @@ tramp_code:                     ; hot-swap trampoline, copied to $0680
         .byte $F0,$FB           ; BEQ *-3
         .byte $6C,$7C,$06       ; JMP (TRAMPVEC)
 
-; psq op/track -> the engine's command number ($FF = not in this mode)
+; psq op/track -> the engine's command number ($FF = not in this mode).
+; Track 3 (voice 4) needs POKEY1 ch3, which mono spends on track 1.
 ;   ops 0 note-on, 1 note-off, 2 drum, 3 preset, 4 param; index = op*4+track
-map_st: .byte 0,2,4,$FF, 1,3,5,$FF, 6,7,6,6, 8,9,10,$FF, 11,11,11,11
+map_st: .byte 0,2,4,14, 1,3,5,15, 6,7,6,6, 8,9,10,16, 11,11,11,11
 map_mono:
         .byte 0,2,$FF,$FF, 1,3,$FF,$FF, 6,6,6,6, 8,9,$FF,$FF, 11,11,11,11
 
@@ -2036,30 +2202,6 @@ numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30
 dpf0:   .byte $00,$00,$00, $3C,$3A,$2A,$1C,$1A,$CC,$CA,$CA,$C8, $00,$00,$B4,$00
 dpf1:   .byte $0E,$0C,$0E, $0F,$0F,$0F,$0F,$0F,$0F,$0F,$0F,$0F, $0E,$0C,$BE,$0E
 dpf2:   .byte $00,$B2,$00, $02,$02,$02,$02,$02,$02,$02,$02,$02, $00,$32,$BE,$00
-
-notenames:
-        .byte 'C'-32,0, 'C'-32,3, 'D'-32,0, 'D'-32,3, 'E'-32,0, 'F'-32,0
-        .byte 'F'-32,3, 'G'-32,0, 'G'-32,3, 'A'-32,0, 'A'-32,3, 'B'-32,0
-drumnames:
-        .byte 'K'-32,'I'-32,'C'-32,'K'-32
-        .byte 'S'-32,'N'-32,'A'-32,'R'-32
-        .byte 'H'-32,'A'-32,'T'-32,0
-        .byte 'O'-32,'P'-32,'E'-32,'N'-32
-        .byte 'T'-32,'O'-32,'M'-32,0
-        .byte 'T'-32,'O'-32,'M'-32,'2'-32
-        .byte 'C'-32,'L'-32,'A'-32,'P'-32
-        .byte 'C'-32,'R'-32,'S'-32,'H'-32
-presetnames:
-        .byte 'P'-32,'I'-32,'A'-32,'N'-32,'O'-32
-        .byte 'O'-32,'R'-32,'G'-32,'A'-32,'N'-32
-        .byte 'F'-32,'L'-32,'U'-32,'T'-32,'E'-32
-        .byte 'S'-32,'T'-32,'R'-32,'N'-32,'G'-32
-        .byte 'B'-32,'A'-32,'S'-32,'S'-32,0
-        .byte 'A'-32,'R'-32,'P'-32,'E'-32,'G'-32
-        .byte 'S'-32,'Y'-32,'N'-32,'T'-32,'H'-32
-        .byte 'B'-32,'E'-32,'L'-32,'L'-32,0
-        .byte 'L'-32,'A'-32,'S'-32,'E'-32,'R'-32
-        .byte 'U'-32,'F'-32,'O'-32,0,0
 
 glyph_codes: .byte G_FULL,G_HALF,G_DARK,G_PEAK,G_OFF,6,7,0
 glyph_data:
@@ -2111,6 +2253,12 @@ text_err:
         .byte 2,16,$80, "DISK ERROR",0
         .byte $FF
 .endif
+text_lyr:
+        .byte 14,9,$00, "LAYER",0
+        .byte $FF
+text_v4:
+        .byte 14,9,$00, "VOICE",0
+        .byte $FF
 text_mono:
         .byte 2,16,$00, "MONO",0
         .byte 14,3,$00, "LEAD",0
@@ -2144,12 +2292,23 @@ scstage:.res 1
 barg:   .res NBAR*BARROWS       ; meter glyphs as drawn (skip unchanged)
 bi:     .res 1
 lastlv: .res NBAR
+liston: .res 1                  ; the song list is up
+lsel:   .res 1                  ; highlighted song
+ltop:   .res 1                  ; first song on screen
+khold:  .res 1                  ; frames the key has been held
+lstick: .res 1                  ; joystick as last read
+shold:  .res 1                  ; frames it has been held
+lrow:   .res 1                  ; list_rows' line counter
+lastsp: .res 1                  ; SPOS low byte at the last progress update
+v3on:   .res 1                  ; the song uses voice 4 (POKEY1 ch3)
+lastv3: .res 1
+n4cnt:  .res 1                  ; voice 4 note-ons (tests)
 lastpk: .res NBAR
-scof:   .res 3                  ; per voice: amplitude level * 64
-scshp:  .res 3                  ; per voice: wave table page                  ; 0 clear + first half, 1 second half + swap
-scph:   .res 3                  ; running phase per voice
-scpb:   .res 3                  ; phase at the start of the trace
-scst:   .res 3                  ; phase step per sample per voice
+scof:   .res 4                  ; per voice: amplitude level * 64
+scshp:  .res 4                  ; per voice: wave table page                  ; 0 clear + first half, 1 second half + swap
+scph:   .res 4                  ; running phase per voice
+scpb:   .res 4                  ; phase at the start of the trace
+scst:   .res 4                  ; phase step per sample per voice
 scy:    .res 1                  ; previous sample's row
 scs:    .res 1                  ; sample index
 scend:  .res 1
@@ -2174,8 +2333,336 @@ lbcell: .res 1
 .include "scope.inc"            ; its tables must be page-aligned
 .assert <sc_sine = 0 && <sc_square = 0, error, "scope tables must be page-aligned"
 .include "tables.inc"
+; names for the panel (moved here: MAIN is full in the disk build)
+notenames:
+        .byte 'C'-32,0, 'C'-32,3, 'D'-32,0, 'D'-32,3, 'E'-32,0, 'F'-32,0
+        .byte 'F'-32,3, 'G'-32,0, 'G'-32,3, 'A'-32,0, 'A'-32,3, 'B'-32,0
+drumnames:
+        .byte 'K'-32,'I'-32,'C'-32,'K'-32
+        .byte 'S'-32,'N'-32,'A'-32,'R'-32
+        .byte 'H'-32,'A'-32,'T'-32,0
+        .byte 'O'-32,'P'-32,'E'-32,'N'-32
+        .byte 'T'-32,'O'-32,'M'-32,0
+        .byte 'T'-32,'O'-32,'M'-32,'2'-32
+        .byte 'C'-32,'L'-32,'A'-32,'P'-32
+        .byte 'C'-32,'R'-32,'S'-32,'H'-32
+presetnames:
+        .byte 'P'-32,'I'-32,'A'-32,'N'-32,'O'-32
+        .byte 'O'-32,'R'-32,'G'-32,'A'-32,'N'-32
+        .byte 'F'-32,'L'-32,'U'-32,'T'-32,'E'-32
+        .byte 'S'-32,'T'-32,'R'-32,'N'-32,'G'-32
+        .byte 'B'-32,'A'-32,'S'-32,'S'-32,0
+        .byte 'A'-32,'R'-32,'P'-32,'E'-32,'G'-32
+        .byte 'S'-32,'Y'-32,'N'-32,'T'-32,'H'-32
+        .byte 'B'-32,'E'-32,'L'-32,'L'-32,0
+        .byte 'L'-32,'A'-32,'S'-32,'E'-32,'R'-32
+        .byte 'U'-32,'F'-32,'O'-32,0,0
+
 
 .ifndef DISK
 .segment "SONGS"
 .incbin "songbank.bin"
 .endif
+
+; ===========================================================================
+; the song list (CODE2, $1400: MAIN is full in the disk build)
+.segment "CODE2"
+
+; 24 GR.0 lines on LISTSCR. One DLI on the last blank line applies DLI band
+; 0 (white on black) to the whole list.
+dlist_list:
+        .byte $70,$70,$F0
+        .byte $42,<LISTSCR,>LISTSCR
+        .res  23,$02
+        .byte $41,<dlist_list,>dlist_list
+
+; The board sends the PC's arrow keys to joystick 1, so the list (and a
+; real joystick) steer through STICK0: up/down move, left/right page. On
+; the panel, left/right change song.
+read_stick:
+        lda STICK0
+        and #$0F
+        cmp lstick
+        beq @held
+        sta lstick
+        lda #0
+        sta shold
+        beq @go
+@held:  ldx liston              ; held: repeats in the list only
+        beq @x
+        inc shold
+        lda shold
+        cmp #24
+        bcc @x
+        lda #20
+        sta shold
+@go:    lda lstick
+        ldx #3
+@m:     cmp stick_v,x
+        beq @k
+        dex
+        bpl @m
+@x:     rts
+@k:     lda stick_k,x
+        ldx liston
+        beq @panel
+        jmp list_key
+@panel: cmp #K_LEFT
+        bne @r
+        jmp prev_song
+@r:     cmp #K_RIGHT
+        bne @x
+        jmp next_song
+
+stick_v:    .byte $0E,$0D,$0B,$07           ; up, down, left, right
+stick_k:    .byte K_UP,K_DOWN,K_LEFT,K_RIGHT
+
+cat_ptr:                        ; A = song -> CPTR = CAT + 1 + A*24
+        sta CPTR
+        lda #0
+        sta CPTR+1
+        asl CPTR
+        rol CPTR+1
+        asl CPTR
+        rol CPTR+1
+        asl CPTR
+        rol CPTR+1              ; *8
+        lda CPTR
+        sta PT3
+        lda CPTR+1
+        sta PT4
+        asl CPTR
+        rol CPTR+1              ; *16
+        clc
+        lda CPTR
+        adc PT3
+        sta CPTR
+        lda CPTR+1
+        adc PT4
+        sta CPTR+1              ; *24
+        clc
+        lda CPTR
+        adc #<(CAT+1)
+        sta CPTR
+        lda CPTR+1
+        adc #>(CAT+1)
+        sta CPTR+1
+        rts
+
+list_open:
+        lda NSONG
+        beq @x
+        lda #1
+        sta liston
+        lda SONGN               ; start on the song that is playing,
+        sta lsel                ;  roughly in the middle of the screen
+        sec
+        sbc #LROWS/2
+        bcs @t
+        lda #0
+@t:     sta ltop
+        jsr list_top
+        ldx #39                 ; the frame: title, rules, keys
+@f:     lda lt_head,x
+        sta LISTSCR+0*40,x
+        lda lt_rule,x
+        sta LISTSCR+1*40,x
+        sta LISTSCR+22*40,x
+        lda lt_keys,x
+        sta LISTSCR+23*40,x
+        dex
+        bpl @f
+        lda #<(LISTSCR+37)      ; song count, top right
+        sta PSCR
+        lda #>(LISTSCR+37)
+        sta PSCR+1
+        lda NSONG
+        ldy #0
+        jsr put_2dig
+        jsr list_rows
+        lda #<dlist_list
+        sta SDLSTL
+        lda #>dlist_list
+        sta SDLSTL+1
+@x:     rts
+
+list_close:
+        lda #0
+        sta liston
+        jsr scope_init          ; the list used the scope's buffer
+        lda #<dlist
+        sta SDLSTL
+        lda #>dlist
+        sta SDLSTL+1
+        rts
+
+list_key:                       ; A = key, while the list is up
+        cmp #K_UP
+        beq @up
+        cmp #K_DOWN
+        beq @down
+        cmp #K_LEFT
+        beq @pgup
+        cmp #K_LT
+        beq @pgup
+        cmp #K_RIGHT
+        beq @pgdn
+        cmp #K_GT
+        beq @pgdn
+        cmp #K_RET
+        beq @play
+        cmp #K_ESC
+        beq @close
+        cmp #K_L
+        beq @close
+        cmp #K_TAB
+        beq @close
+        rts
+@close: jmp list_close
+@play:  jsr list_close
+        lda lsel
+        jmp song_load
+@up:    lda lsel
+        beq @r
+        dec lsel
+        jmp @move
+@down:  ldx lsel
+        inx
+        cpx NSONG
+        bcs @r
+        stx lsel
+        jmp @move
+@pgup:  lda lsel
+        sec
+        sbc #LROWS
+        bcs @s
+        lda #0
+        beq @s
+@pgdn:  lda lsel
+        clc
+        adc #LROWS
+        cmp NSONG
+        bcc @s
+        ldx NSONG
+        dex
+        txa
+@s:     sta lsel
+@move:  jsr list_top
+        jmp list_rows
+@r:     rts
+
+list_top:                       ; keep lsel on screen, and the screen full
+        lda lsel
+        cmp ltop
+        bcs @a
+        sta ltop                ; above the window: it becomes the top
+@a:     lda lsel
+        sec
+        sbc #LROWS-1
+        bcc @b
+        cmp ltop
+        bcc @b
+        sta ltop                ; below it: it becomes the bottom
+@b:     lda NSONG               ; never past the last full screen
+        sec
+        sbc #LROWS
+        bcs @c
+        lda #0
+@c:     cmp ltop
+        bcs @x
+        sta ltop
+@x:     rts
+
+list_rows:                      ; the 20 song lines, rows 2-21
+        lda #0
+        sta lrow                ; screen row - 2 (put_2dig uses PT1)
+@row:   lda lrow
+        clc
+        adc #2
+        tax
+        lda sc_m40lo,x
+        sta PSCR
+        lda sc_m40hi,x
+        ora #>LISTSCR
+        sta PSCR+1
+        ldy #39
+        lda #0
+@clr:   sta (PSCR),y
+        dey
+        bpl @clr
+        lda lrow
+        clc
+        adc ltop
+        sta PT2                 ; song index
+        cmp NSONG
+        bcs @next
+        cmp SONGN               ; the song that is playing: a marker
+        bne @num
+        lda #'>'-32
+        ldy #1
+        sta (PSCR),y
+@num:   lda PT2
+        clc
+        adc #1
+        ldy #3
+        jsr put_2dig
+        lda PT2
+        jsr cat_ptr
+        ldy #0                  ; title, columns 7-22
+@ti:    lda (CPTR),y
+        sta PT3
+        tya
+        clc
+        adc #7
+        tay
+        lda PT3
+        sta (PSCR),y
+        tya
+        sec
+        sbc #6
+        tay
+        cpy #16
+        bne @ti
+        ldy #20                 ; length m:ss, columns 33-37
+        lda (CPTR),y
+        pha
+        iny
+        lda (CPTR),y
+        sta PT4
+        pla
+        ldy #32
+        jsr put_2dig            ; minutes -> 32,33
+        lda #':'-32
+        ldy #34
+        sta (PSCR),y
+        lda PT4
+        ldy #35
+        jsr put_2dig            ; seconds -> 35,36
+        lda PT2                 ; the highlighted one: an inverse bar
+        cmp lsel
+        bne @next
+        ldy #39
+@inv:   lda (PSCR),y
+        ora #$80
+        sta (PSCR),y
+        dey
+        bpl @inv
+@next:  inc lrow
+        lda lrow
+        cmp #LROWS
+        beq @x
+        jmp @row
+@x:     rts
+
+.macro G0 str                   ; a 40-cell GR.0 line
+        .repeat 40, I
+        .if I < .strlen(str)
+        .byte (.strat(str, I) - 32) & $3F
+        .else
+        .byte 0
+        .endif
+        .endrepeat
+.endmacro
+lt_head:    G0 " POKEY PLAYER  -  SONG LIST       OF"
+lt_rule:    G0 "----------------------------------------"
+lt_keys:    G0 " ARROWS/STICK MOVE  RETURN PLAY  ESC BACK"

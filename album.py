@@ -88,7 +88,7 @@ def picks(text):
             continue
         if not inside:
             continue
-        m = re.match(r"^\s+(lead|bass|harmony|drums|\+ also)\s+(\d[\d:,]*)(\s|$)", line)
+        m = re.match(r"^\s+(lead|bass|harmony|voice4|drums|\+ also)\s+(\d[\d:,]*)(\s|$)", line)
         if not m:
             break                       # the block ended
         if m.group(1) != "+ also":

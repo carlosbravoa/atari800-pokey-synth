@@ -949,7 +949,10 @@ lv_step:                        ; VBI, X = block
         beq @go
         ldy #$04+P2
         lda #0
+; lv_go: render voice block X on registers Y (A = 1 for a 16-bit pair),
+; skipping lv_step's routing (POKEY PLAYER's fourth voice on POKEY1 ch3)
 @go:    sty VT2                 ; AUDF register offset
+lv_go = @go
         sta VT3                 ; 1 = 16-bit pair
         lda #0
         sta VT1                 ; 1 = render a held chord (lv_tones)
