@@ -130,3 +130,5 @@ Three more picker lessons, all confirmed on the machine:
 | ng2_rfb | 1-2 | skipped by Carlos; lead is a step-0.1 repeated line |
 | dd2shad | 5 | lead = top line of an 88%-chord channel |
 | vanlake | skipped | lead fixed to the xylophone line (tuned percussion = lead family) |
+| ng2_act | 5 | single-part file, doubled + echoed |
+| bt-pause | moved on | percussion-only file: now converts as a drums-only sequence instead of failing |

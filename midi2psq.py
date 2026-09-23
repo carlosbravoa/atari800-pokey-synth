@@ -238,18 +238,7 @@ def auto_pick(mid, start=0.0, end=0.0):
               ", ".join(f"{x.spec} prog {x.prog}" for x in perc) + " as drums)")
     mel = [x for x in st if not x.drum and not x.perc and x.n >= 8]
     if not mel:
-        # some files write their music on channel 10 (bt-pause): if nothing
-        # else carries notes, take the widest-ranging one as the melody
-        cand = [x for x in st if x.n >= 8 and
-                max(x.pitches) - min(x.pitches) >= 12]
-        if cand:
-            mel = [max(cand, key=lambda x: x.ntop)]
-            drums = [x for x in drums if x != mel[0].spec]
-            print(f"  (no melodic channel; {mel[0].spec} is on channel 10 but "
-                  f"spans {max(mel[0].pitches) - min(mel[0].pitches)} semitones, "
-                  f"so playing it as the melody)")
-    if not mel:
-        return "", "", "", ",".join(drums)
+        return "", "", "", ",".join(drums)   # percussion-only file
     span = max(x.last for x in mel) - min(x.first for x in mel) or 1
     cover = lambda x: (x.last - x.first) / span
 
@@ -486,8 +475,10 @@ def main():
         return
     if not (a.lead or a.bass):                 # nothing chosen: choose for them
         a.lead, a.bass, a.harm, a.drums = auto_pick(mid, a.start, a.end)
+        if not a.lead and not a.drums:
+            sys.exit("nothing to play; use --inspect and pick by hand")
         if not a.lead:
-            sys.exit("no melodic parts found; use --inspect and pick by hand")
+            print("  (percussion only: a drums-only sequence)")
 
     nums = lambda s: [x.strip() for x in s.split(",") if x.strip()]
     parts = {}
