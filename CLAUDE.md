@@ -150,6 +150,51 @@ music the `.psq` streams.
   anything now means moving code between segments first; all three are
   nearly full.
 
+## POKEY PLAYER (standalone song player, no PC)
+
+```bash
+make build/player.xex         # 6 songs baked in (songbank.bin, $5000-$9FFF)
+make build/pokeyplayer.atr    # bootable disk: loader + catalog + player + 24 songs
+make playerdeploy             # hot-swap the .xex onto the board
+python3 test_player.py [-v]   # py65: sequencer vs .psq counts, keys, mono, panel dump
+python3 test_disk.py          # py65: boots the .atr (fake DSKINV), all songs byte-exact
+python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by peeks
+```
+
+- **Shares the synth's engine, never copies it**: `gen_engine.py` slices the
+  sound routines, their tables and every equate out of `synth.s` into
+  `engine.inc`. Engine fixes land in both programs by rebuilding. A new
+  engine routine or table must be added to its ROUTINES/DATA lists.
+- **Sequencer** (`seq_step`, VBI): walks the .psq body in memory as-is
+  (delta, op<<4|track, arg). Each op+track maps through `mapt` (stereo or
+  mono table, picked at song load) onto the synth's stream command numbers,
+  so one song plays on either machine. STREAMON = 1 while playing keeps
+  `pokey_out` from mirroring over POKEY2. END sets PENDN and the main loop
+  moves on to the next song.
+- **Panel**: row 0-1 mode 7 (title, song name), 2 status + clock, 3 progress
+  (40 cells, one per `pstep` frames from the catalog), 5-13 ANTIC-4 voice
+  meters (LEAD LAYER DRUM | BASS HARM DRUM from the AUDC volumes in the
+  register image, 18 levels, peak hold), 15-16 note and instrument per
+  voice, 19-20 eight percussion LEDs, 22 a scrolling activity trace. One
+  table-driven DLI per color band (dpf0-2, stepped by `dlin`).
+  In mono the right-hand meters are dead and column 2 reads VOICE.
+- **Keys**: SPACE pause, `<` `>` song, RETURN replay, ESC stop, 1-9 pick.
+- **Page 6**: PLAYING $0644 SONGN $0645 NSONG $0646 SEVN $0647 (events,
+  liveness) PAUSED $0648 SPTR $0656 DWAIT $0658 SPOS $065A (frames) SECS
+  $065C MINS $0661 DRT $0662 (8 LED timers). Hot-swap slots as the synth.
+- **Disk** (`-D DISK`, `mkdisk.py`): 128-byte sectors. 1-3 boot loader
+  (`boot.s`, reads the .xex from sector 12 and jumps through RUNAD), 4-11
+  catalog (24 bytes per song, the same as the bank's, with first sector and
+  sector count in place of the address), then the player, then the songs,
+  each at most 160 sectors. Songs load into $5000 through DSKINV.
+  LOADING $0BC0 keeps the VBI off POKEY while SIO uses it, and `snd_back`
+  restores AUDCTL/SKCTL afterwards.
+- The firmware mounts any ATR size, but the bridge can't mount one: `atari.py
+  send build/pokeyplayer.atr POKEYPLR.ATR` puts it on the SD, and a person
+  mounts it on D1: from the OSD and boots.
+- Most rated conversions were cut at ~50 s (`--end 50` in the rating
+  sessions). Full-length re-conversions are needed for a complete album.
+
 ## MIDI -> .psq (`midi2psq.py`)
 
 ```bash
