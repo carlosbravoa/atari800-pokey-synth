@@ -185,6 +185,13 @@ class Stat:
         self.ntop = len(top)
         self.repeats = (sum(1 for d in steps if d < 1.2) / len(steps)) if steps else 0
         self.iv = [(a, b) for _, a, b in ns]           # when it sounds
+        self.pitches = sorted({n for n, _, _ in ns})
+        # percussion written on an ordinary channel (NES/arcade rips do
+        # this): a sound-effect program, or a couple of pitches hammered
+        # fast. Melodically it is noise, so keep it out of the parts.
+        self.perc = (not self.drum and
+                     ((self.prog is not None and self.prog >= 120) or
+                      (len(self.pitches) <= 6 and self.dens > 5)))
 
 
 def channel_stats(mid, start=0.0, end=0.0):
@@ -220,7 +227,12 @@ def auto_pick(mid, start=0.0, end=0.0):
     """
     st = channel_stats(mid, start, end)
     drums = [x.spec for x in st if x.drum]
-    mel = [x for x in st if not x.drum and x.n >= 8]
+    perc = [x for x in st if x.perc]
+    if not drums and perc:                   # no channel 10: use the
+        drums = [x.spec for x in perc]       #  percussion-like channels
+        print("  (no percussion channel; using " +
+              ", ".join(f"{x.spec} prog {x.prog}" for x in perc) + " as drums)")
+    mel = [x for x in st if not x.drum and not x.perc and x.n >= 8]
     if not mel:
         return "", "", "", ",".join(drums)
     span = max(x.last for x in mel) - min(x.first for x in mel) or 1
@@ -455,7 +467,14 @@ def main():
                              ("harm", a.harm, "high")):
         parts[name] = part(mid, nums(sel), which,
                            second=(name == "harm" and a.harm_second)) if sel else []
-    drums = events_of(mid, nums(a.drums), drums_only=True) if a.drums else []
+    # channel 10 normally, but a rip may put its drums on an ordinary
+    # channel (auto_pick spots those), so fall back to reading it as-is
+    drums, gm_drums = [], True
+    if a.drums:
+        drums = events_of(mid, nums(a.drums), drums_only=True)
+        if not drums:                        # a rip with drums on an
+            gm_drums = False                 #  ordinary channel: the
+            drums = events_of(mid, nums(a.drums), drums_only=False)
 
     if a.end:
         for k in parts:
@@ -502,8 +521,13 @@ def main():
         "harm": add_part(w, 2, parts["harm"], a.preset_harm, start_frame),
     }
     hits, unknown = 0, set()
+    gm = gm_drums                            #  pitches mean nothing there
+    order = sorted({n for n, _, _ in drums})
+    # a non-GM percussion part (pitches mean nothing): lowest = kick, next
+    # = snare, the rest = hats
+    byorder = {n: (0 if i == 0 else 1 if i == 1 else 2) for i, n in enumerate(order)}
     for n, s0, _ in drums:
-        d = GM_DRUM.get(n)
+        d = GM_DRUM.get(n) if gm else byorder.get(n, 2)
         if d is None:
             unknown.add(n)
             d = 2

@@ -87,3 +87,6 @@ tuning heuristics on ears.
 | file | rating | lead picked |
 |---|---|---|
 | rcr-main | 4 -> 5 | 11:9 (top line of a chord channel) after the fix |
+| rcr-boss | 5 | 10:9 lead, merged harmony |
+| bt-theme | 3 | poor source MIDI, per Carlos |
+| battletoads_turbo | 1-2 -> 4 | its drums live on an ordinary channel (prog 126, 2 pitches at 10/s): now detected, kept out of the melody, and mapped by pitch order |
