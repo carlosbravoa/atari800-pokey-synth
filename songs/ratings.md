@@ -90,3 +90,6 @@ tuning heuristics on ears.
 | rcr-boss | 5 | 10:9 lead, merged harmony |
 | bt-theme | 3 | poor source MIDI, per Carlos |
 | battletoads_turbo | 1-2 -> 4 | its drums live on an ordinary channel (prog 126, 2 pitches at 10/s): now detected, kept out of the melody, and mapped by pitch order |
+| btdslv5surf | 5 | |
+| topgear1 | 5 | 1756 notes + 585 hits in 50 s: the stream keeps up |
+| drmfever | 1-2 | source problem: melody+accompaniment+bass share one channel; skipped |

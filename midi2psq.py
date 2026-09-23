@@ -255,6 +255,13 @@ def auto_pick(mid, start=0.0, end=0.0):
             return 1.5       # stepwise: a tune
         return 0.3 if x.step <= 9.0 else 0.0     # leaps: arpeggio or bass
 
+    def whole_arrangement(x):
+        """one channel carrying melody AND accompaniment AND bass (a piano
+        reduction): wide range with a low centre. Its top line is not the
+        tune. Chordy leads with a high centre are fine (StarmanE, rcr-main)."""
+        rng = max(x.pitches) - min(x.pitches)
+        return 1.5 if rng >= 36 and x.mean <= 60 else 0.0
+
     def lead_score(x):
         # note count, not "how much of the time it sounds": in the rated
         # set the busiest-sounding channel was wrong in both directions
@@ -262,7 +269,8 @@ def auto_pick(mid, start=0.0, end=0.0):
         # melodic lines cost a 5 -> 3 on dbz2bsgt
         return (0.6 * (1.0 - x.poly) + 2.5 * min(x.ntop, 120) / 120
                 + 0.8 * min(x.dens, 6) / 6 + step_fit(x)
-                + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 40)
+                + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 40
+                - whole_arrangement(x))
 
     def bass_score(x):
         fam = {"bass": 1.2, "melodic": 0.2, "other": 0.2, "?": 0.2,
