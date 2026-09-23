@@ -175,11 +175,15 @@ class Stat:
             prev = t
         self.poly = poly / live if live else 0.0
         self.active = live / span
-        # melodies move in small steps; basses and arpeggios leap
-        top = sorted(ns, key=lambda e: (e[1], -e[0]))
+        # Judge the part the way it will be PLAYED: one note at a time,
+        # top note of each chord. A melody is often written as the top of a
+        # chord channel, so raw polyphony says little about its role.
+        top = m2p.mono_events(ns, prefer="high")
         seq = [n for n, _, _ in top]
         steps = [abs(b - a) for a, b in zip(seq, seq[1:])] or [12]
         self.step = sum(steps) / len(steps)
+        self.ntop = len(top)
+        self.repeats = (sum(1 for d in steps if d < 1.2) / len(steps)) if steps else 0
         self.iv = [(a, b) for _, a, b in ns]           # when it sounds
 
 
@@ -244,7 +248,7 @@ def auto_pick(mid, start=0.0, end=0.0):
         # set the busiest-sounding channel was wrong in both directions
         # note count carries real weight: picking the sparser of two
         # melodic lines cost a 5 -> 3 on dbz2bsgt
-        return (2.0 * (1.0 - x.poly) + 2.5 * min(x.n, 120) / 120
+        return (0.6 * (1.0 - x.poly) + 2.5 * min(x.ntop, 120) / 120
                 + 0.8 * min(x.dens, 6) / 6 + step_fit(x)
                 + 0.6 * fam_hint(x, "lead") - abs(x.mean - 74) / 40)
 
@@ -267,13 +271,9 @@ def auto_pick(mid, start=0.0, end=0.0):
     # otherwise hand the lead to a busy bass line)
     high = [x for x in mel if x.mean >= 50] or mel
     lead = max(high, key=lead_score)
-    if lead.poly > 0.5:                  # a chord channel: its top line is a
-        alt = [x for x in high           #  harmony, so prefer a real single
-               if x is not lead and x.poly < 0.2 and step_fit(x) > 0
-               and x.n >= 0.25 * lead.n and x.mean >= 52
-               and x.family not in ("bass",)]
-        if alt:
-            lead = max(alt, key=lead_score)
+    # (an older rule swapped away from chord channels here; with the score
+    # now computed on each candidate's top line that was wrong - it handed
+    # the lead to a counter-line in rcr-main)
     rest = [x for x in mel if x is not lead]
     bass = max(rest, key=bass_score) if rest else None
     rest = [x for x in rest if x is not bass]
@@ -475,11 +475,15 @@ def main():
     # percussive sound: on a sustaining preset each repeat merges into the
     # one before and a whole melody is heard as a single stuck note.
     def auto_preset(events, default):
+        """PIANO when the part repeats pitches a lot. The mean step hides
+        this once two channels are merged (a leaping part averages the
+        repeats away), so count how many steps are repeats instead."""
         if not events:
             return default
         seq = [n for n, _, _ in sorted(events, key=lambda e: e[1])]
         steps = [abs(b - a2) for a2, b in zip(seq, seq[1:])] or [12]
-        return "PIANO" if sum(steps) / len(steps) < 1.2 else default
+        repeats = sum(1 for d in steps if d < 1.2) / len(steps)
+        return "PIANO" if repeats >= 0.4 else default
 
     if a.preset_lead == "ORGAN":
         a.preset_lead = auto_preset(parts["lead"], "ORGAN")

@@ -75,3 +75,15 @@ tuning heuristics on ears.
    elsewhere. Manually: `--lead 5:4,3:2` (first has priority).
 5. **Note count beats register** when choosing between melodic lines:
    picking the sparser one cost a 5 -> 3 on dbz2bsgt.
+
+## Second round, after scoring each candidate by its TOP LINE
+
+6. **Judge a candidate as it will be played**: one note at a time, top note
+   of each chord. Melodies are often written as the top of a chord channel
+   (StarmanE, rcr-main), so raw polyphony says little. Scoring the
+   mono-reduced line - and deleting the old "swap away from chord
+   channels" rule - turned rcr-main from "that's the second voice" into a 5.
+
+| file | rating | lead picked |
+|---|---|---|
+| rcr-main | 4 -> 5 | 11:9 (top line of a chord channel) after the fix |
