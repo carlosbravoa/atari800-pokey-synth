@@ -175,8 +175,22 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   (40 cells, one per `pstep` frames from the catalog), 5-13 ANTIC-4 voice
   meters (LEAD LAYER DRUM | BASS HARM DRUM from the AUDC volumes in the
   register image, 18 levels, peak hold), 15-16 note and instrument per
-  voice, 19-20 eight percussion LEDs, 22 a scrolling activity trace. One
-  table-driven DLI per color band (dpf0-2, stepped by `dlin`).
+  voice, 17 rule, 18-19 eight percussion LEDs, 20-22 the oscilloscope
+  (24 ANTIC E lines), 23 keys. One table-driven DLI per color band
+  (dpf0-2, stepped by `dlin`, 16 bands).
+- **Oscilloscope**: rebuilt from the voices, since POKEY can't be read:
+  per voice a sine (pure wave) or square (poly waves) at `sc_step[note]`
+  (pitch compressed: C1 ~2 cycles across, x1.41 per octave) and amplitude
+  `sc_lvl[AUDC volume]`, plus drum noise; 80 samples, vertical runs between
+  samples. Double-buffered at SCOPEA $1800 / SCOPEB $1C00 (the DL's LMS
+  high byte flips), one trace per 4 frames: clear, then three thirds.
+  Runs of 3+ rows go through `sc_col`, an unrolled per-row OR routine
+  entered at row lo with an RTS patched in after row hi; `sc_flip` retargets
+  its 48 operands to the other buffer (bit 2 of the high byte).
+- **Frame budget**: the panel must fit one frame. Meters redraw only changed
+  cells and half the bars per frame. DRAWN $0BC1 counts main-loop passes:
+  it must advance exactly with RTCLOK (`hwplayer.py` checks it; 0 dropped
+  on KALINKA). py65's worst draw_all is ~13.5k cycles.
   In mono the right-hand meters are dead and column 2 reads VOICE.
 - **Keys**: SPACE pause, `<` `>` song, RETURN replay, ESC stop, 1-9 pick.
 - **Page 6**: PLAYING $0644 SONGN $0645 NSONG $0646 SEVN $0647 (events,
@@ -192,8 +206,14 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
 - The firmware mounts any ATR size, but the bridge can't mount one: `atari.py
   send build/pokeyplayer.atr POKEYPLR.ATR` puts it on the SD, and a person
   mounts it on D1: from the OSD and boots.
-- Most rated conversions were cut at ~50 s (`--end 50` in the rating
-  sessions). Full-length re-conversions are needed for a complete album.
+- **Album** (`album.py` -> songs/album/, read by mkdisk.py and
+  gen_songbank.py): full-length conversions. Rated songs (rated on their
+  first 50 s) reuse the picks the current converter makes for that window,
+  passed explicitly. Many differ from the older songs/*.psq files because
+  the converter improved since (harmony octave drop, relays, timing), and
+  some of those files had been overwritten by later experiments anyway.
+  Songs over 20 KB are cut to fit (TOP GEAR 87 s of 201 s). LittleD and
+  superc3 are left out: their coverage maps flag wrong auto picks.
 
 ## MIDI -> .psq (`midi2psq.py`)
 

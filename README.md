@@ -11,7 +11,8 @@ POKEY and switch to stereo by themselves when a second POKEY answers at
 - **POKEY PLAYER** (`build/player.xex` or the bootable
   `build/pokeyplayer.atr`) plays songs with no PC attached. Its screen shows
   voice-pressure meters with peak hold, percussion LEDs that flash, the notes
-  and instruments each voice is playing, a progress bar and a clock.
+  and instruments each voice is playing, an oscilloscope, a progress bar and
+  a clock.
 
 Both programs use the same sound engine. `gen_engine.py` copies it out of
 `synth.s` into `engine.inc`, so a sound fix reaches both on the next build.
@@ -40,13 +41,37 @@ python3 test_disk.py    # boots the .atr in the emulator and checks every song
 
 When a song ends, the next one starts.
 
+The oscilloscope redraws the mix 15 times a second. POKEY's output can't be
+read back, so each voice contributes a wave at its pitch and loudness: a sine
+for pure tones, a square for buzzy sounds, and noise for drums. Pitch is
+compressed so every note shows a few cycles.
+
 **From a disk:** copy `build/pokeyplayer.atr` to the SD card, mount it on
 D1: and cold-boot. The screen turns blue while the loader reads the player.
 The player then reads the song list and loads each song from disk when you
-pick it.
+pick it. The disk holds the album: 37 songs, about an hour.
 
-**As a .xex:** `build/player.xex` has six songs built in, which is all that
+**As a .xex:** `build/player.xex` has five songs built in, which is all that
 fits in memory. `make playerdeploy` puts it on the board over the PC link.
+
+## The album
+
+`album.py` lists every song on the disk and converts them all at full
+length into `songs/album/`. `mkdisk.py` then builds the disk from that list.
+
+```bash
+python3 album.py     # convert (prints length, size and any warnings per song)
+python3 mkdisk.py    # build/pokeyplayer.atr from the album
+```
+
+- Songs marked `rated` were rated 4-5 while listening to their first 50
+  seconds. Their full versions use the same parts the converter picks for
+  those 50 seconds.
+- Songs marked `new` haven't been rated yet.
+- A song too long for the 20 KB buffer is cut at the longest length that
+  fits, and the table says so.
+- To add a song, add a line to `ALBUM` in `album.py` and run both commands.
+  That's the easy way to do step 4 below.
 
 ## Putting your own MIDI songs on the disk
 
@@ -100,9 +125,9 @@ python3 psq.py songs/mysong.psq         # length, notes and drum hits
 
 ### 4. Build the disk
 
-`mkdisk.py` with no arguments writes the default song list, `DISK_SONGS` at
-the top of the script. Add your song there, or list the songs you want. A
-list replaces the default one, and songs play in the order given:
+`mkdisk.py` with no arguments builds the album (see above). To make a
+different disk, list the songs you want. A list replaces the album, and
+songs play in the order given:
 
 ```bash
 make build/player_disk.xex build/boot.bin    # the player and loader it packs

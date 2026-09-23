@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build build/pokeyplayer.atr: a bootable POKEY PLAYER disk, no PC needed.
 
-    python3 mkdisk.py [song ...]          # default: DISK_SONGS below
+    python3 mkdisk.py [song ...]          # default: the album (album.py)
 
 Single density (128-byte sectors), at least 720 sectors:
     1-3     boot loader (boot.s), patched with where the player lives
@@ -25,14 +25,13 @@ ENT = 24
 MAXSEC = (0xA000 - 0x5000) // SS
 RATE = 59.92
 
-# every song rated 4-5 (songs/ratings.md), ANTHEM first
-DISK_SONGS = [
-    "anthem", "kalinka", "StarmanE", "dbztheme", "MetalstormLvl3", "cas-kid_",
-    "Revontulet", "KoopaTroopaBeach", "DonutPlains", "topgear1", "rcr-main",
-    "rcr-boss", "btdslv5surf", "dd2shad", "dbz2bvt", "dbz2bsgt", "Dbz2",
-    "ng2_act", "smb109", "temp", "smkrainbow", "battletoads_turbo", "sdb-titl",
-    "gtgm",
-]
+def album_paths():
+    """the album (album.py), in its order, from songs/album/"""
+    import album
+    return [os.path.join(album.OUT, name + ".psq") for name, _, _ in album.ALBUM]
+
+
+DISK_SONGS = album_paths()
 
 
 def sectors(data):
@@ -50,6 +49,7 @@ def build(names, out="build/pokeyplayer.atr"):
     songs = []
     for name in names:
         path = name if os.path.exists(name) else os.path.join(HERE, "songs", name + ".psq")
+        name = os.path.basename(path)[:-4]
         h, _ = psq.read(path)
         body = open(path, "rb").read()[32:]
         if sectors(body) > MAXSEC:

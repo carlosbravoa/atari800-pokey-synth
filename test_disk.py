@@ -87,12 +87,12 @@ check(mem[PAGE6["NSONG"]] == len(DISK_SONGS), f"catalog read: {mem[PAGE6['NSONG'
 check(mem[PAGE6["PLAYING"]] == 1 and mem[PAGE6["LOADING"]] == 0, "song 1 loaded and playing")
 
 
-def song_bytes(name):
-    return open(f"songs/{name}.psq", "rb").read()[32:]
+def song_bytes(path):
+    return open(path, "rb").read()[32:]
 
 
 body = song_bytes(DISK_SONGS[0])
-check(bytes(mem[0x5000:0x5000 + len(body)]) == body, f"{DISK_SONGS[0]}: {len(body)} bytes identical")
+check(bytes(mem[0x5000:0x5000 + len(body)]) == body, f"song 1: {len(body)} bytes identical")
 
 # ---- every song: load from disk, compare bytes, play 300 frames -----------
 mem[PAGE6["STEREO"]] = 1
@@ -105,7 +105,7 @@ for i, name in enumerate(DISK_SONGS):
     same = bytes(mem[0x5000:0x5000 + len(body)]) == body
     for _ in range(300):
         call(L("seq_step"))
-    h, ev = psq.read(f"songs/{name}.psq")
+    h, ev = psq.read(name)
     cmds, _ = psq.to_commands(ev, stereo=1)
     want = {}
     for f, c, a in cmds:

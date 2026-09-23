@@ -6,8 +6,8 @@
 ; through the generated engine.inc (gen_engine.py slices it out of synth.s).
 ;
 ; The screen is the point: six voice-pressure meters with peak hold, eight
-; percussion LEDs that blink on every hit, a progress bar, a scrolling
-; activity trace and the notes/instruments each voice is playing.
+; percussion LEDs that blink on every hit, a progress bar, an oscilloscope
+; and the notes/instruments each voice is playing.
 ;
 ; Keys:  SPACE pause/resume · < > previous/next song · RETURN replay
 ;        ESC stop · 1-9 pick a song
@@ -37,6 +37,8 @@ DRT      = $0662        ; 8 drum LED timers ($0662-$0669)
 LASTDL   = $066A        ; drum sounding on POKEY1 ch4
 LASTDR   = $066B        ; ... and on POKEY2 ch4
 ENDF     = $066C        ; the stream hit END
+DRAWN    = $0BC1        ; +1 per main-loop pass: equals FRAME's pace when
+                        ;  the panel keeps up (no dropped frames)
 
 SONGS    = $5000        ; song bank: catalog + event streams (disk: the one
                         ;  song loaded from disk)
@@ -63,14 +65,16 @@ NBAR     = 6            ; voice meters
 BARTOP   = 5            ; first meter row
 BARROWS  = 9
 
+SCOPEA   = $1800        ; oscilloscope: two 24-line ANTIC E bitmaps
+SCOPEB   = $1C00        ;  (40 bytes a line), shown alternately
+SCN      = 80           ; samples across (2 pixels each)
+
 ; glyph codes (punctuation slots: none of the player's text uses them)
 G_FULL   = 1            ; meter segment, lit        (ANTIC 4)
 G_HALF   = 2            ; meter segment, half lit   (ANTIC 4)
 G_DARK   = 3            ; meter segment, unlit      (ANTIC 4)
 G_PEAK   = 4            ; peak-hold marker          (ANTIC 4)
 G_OFF    = 5            ; LED / progress cell, dark (GR.0)
-G_BIG    = 6            ; activity trace, tall      (GR.0)
-G_SML    = 7            ; activity trace, short     (GR.0)
 G_ON     = $80          ; LED / progress cell, lit  (inverse space)
 
 ; ---- zero page (main thread) ----
@@ -82,6 +86,7 @@ PT4      = $9B
 PLVL     = $9C
 PPK      = $9D
 PCOL     = $9E
+SCV      = $A0          ; 2: the scope's column-routine entry (jmp indirect)
 
 ; ===========================================================================
 .segment "XEXHDR"
@@ -126,12 +131,16 @@ dlist:
         .byte $C4,<(SCREEN+11*40),>(SCREEN+11*40)
         .byte $C4,<(SCREEN+12*40),>(SCREEN+12*40)
         .byte $C4,<(SCREEN+13*40),>(SCREEN+13*40)       ; 13 meters, last
-        .byte $02,$02                                   ; 14 labels, 15 notes
-        .byte $02,$02                                   ; 16 presets, 17 spacer
-        .byte $C2,<(SCREEN+18*40),>(SCREEN+18*40)       ; 18 rule       +DLI
-        .byte $02                                       ; 19 drum LEDs
-        .byte $C2,<(SCREEN+20*40),>(SCREEN+20*40)       ; 20 drum names +DLI
-        .byte $02,$02,$02                               ; 21-23
+        .byte $02,$02,$02                               ; 14 labels, 15 notes,
+                                                        ;  16 instruments
+        .byte $C2,<(SCREEN+17*40),>(SCREEN+17*40)       ; 17 rule       +DLI
+        .byte $02                                       ; 18 drum LEDs
+        .byte $C2,<(SCREEN+19*40),>(SCREEN+19*40)       ; 19 drum names +DLI
+scope_lms:                                              ; 20-22: the scope,
+        .byte $4E,<SCOPEA,>SCOPEA                       ;  24 ANTIC E lines
+        .res  22,$0E
+        .byte $8E                                       ;  last line   +DLI
+        .byte $42,<(SCREEN+23*40),>(SCREEN+23*40)       ; 23 keys
         .byte $41,<dlist,>dlist
 
 ; ===========================================================================
@@ -232,6 +241,7 @@ start:
         jsr detect_stereo
         jsr cls
         jsr draw_static
+        jsr scope_init
         lda #7
         ldx #>vbi
         ldy #<vbi
@@ -250,6 +260,7 @@ start:
 
 mainloop:
         jsr wait_frame
+        inc DRAWN
         lda PARKREQ
         bne park_self
         jsr read_keys
@@ -779,14 +790,16 @@ key_cmd:                        ; A = a new key press
 draw_all:
         jsr draw_bars
         jsr draw_leds
-        jsr draw_hist
+        jsr draw_scope
         jsr draw_voices
         jsr draw_prog
         jmp draw_time
 
 ; ---- six voice-pressure meters, 9 rows tall, with peak hold ---------------
-draw_bars:
-        ldx #0
+draw_bars:                      ; half the meters each frame (30 Hz each)
+        lda FRAME
+        and #1
+        tax
 @bar:   stx PCOL
         ldy vusrc,x
         cpy #$FF
@@ -812,7 +825,20 @@ draw_bars:
 @slip:  lda vupk,x
         beq @draw
         dec vupk,x
-@draw:  lda barcol,x            ; bottom cell of this meter
+@draw:  lda PLVL                ; level and peak as last drawn: nothing to do
+        cmp lastlv,x
+        bne @chg
+        lda vupk,x
+        cmp lastpk,x
+        bne @chg
+        jmp @nextb
+@chg:   lda PLVL
+        sta lastlv,x
+        lda vupk,x
+        sta lastpk,x
+        lda bar9,x              ; this meter's slice of the glyph cache
+        sta bi
+        lda barcol,x            ; bottom cell of this meter
         clc
         adc #<(SCREEN+13*40)
         sta PSCR
@@ -847,10 +873,15 @@ draw_bars:
         lda #G_PEAK
         jmp @put
 @off:   lda #G_DARK
-@put:   ldy #4
+@put:   ldx bi                  ; unchanged since the last frame: skip it
+        cmp barg,x
+        beq @same
+        sta barg,x
+        ldy #4
 @st:    sta (PSCR),y
         dey
         bpl @st
+@same:  inc bi
         sec
         lda PSCR
         sbc #40
@@ -861,10 +892,11 @@ draw_bars:
         lda PT3
         cmp #BARROWS
         bne @seg
-        ldx PCOL
+@nextb: ldx PCOL
+        inx
         inx
         cpx #NBAR
-        beq @done
+        bcs @done
         jmp @bar
 @done:  rts
 
@@ -889,10 +921,10 @@ draw_leds:
 @put:   sta PT1
         lda ledcol,x
         clc
-        adc #<(SCREEN+19*40)
+        adc #<(SCREEN+18*40)
         sta PSCR
         lda #0
-        adc #>(SCREEN+19*40)
+        adc #>(SCREEN+18*40)
         sta PSCR+1
         lda PT1
         ldy #3
@@ -901,41 +933,6 @@ draw_leds:
         bpl @s
         dex
         bpl @p
-        rts
-
-; ---- the activity trace: one cell per frame, scrolling left ---------------
-draw_hist:
-        ldx #0
-@sh:    lda SCREEN+22*40+1,x
-        sta SCREEN+22*40,x
-        inx
-        cpx #39
-        bne @sh
-        lda #0
-        sta PT1
-        ldx #0
-@m:     ldy vusrc,x
-        cpy #$FF
-        beq @nx
-        lda SH,y
-        and #$0F
-        cmp PT1
-        bcc @nx
-        sta PT1
-@nx:    inx
-        cpx #NBAR
-        bne @m
-        lda PT1
-        cmp #9
-        bcs @big
-        cmp #3
-        bcs @sml
-        lda #0
-        beq @put
-@sml:   lda #G_SML
-        bne @put
-@big:   lda #G_BIG
-@put:   sta SCREEN+22*40+39
         rts
 
 ; ---- what each voice is playing: note (row 15) and instrument (row 16) ----
@@ -1117,6 +1114,342 @@ put_inst:                       ; X = column, A = $FF none / preset 0-9
         bne @n
 @x:     rts
 
+; ---- the oscilloscope ----------------------------------------------------
+; POKEY's output can't be read back, so the trace is rebuilt from what the
+; voices are doing: each contributes a wave at its pitch (sc_step by note)
+; and loudness (its AUDC volume), a sine for pure tones and a square for the
+; poly waves, and a drum adds noise. 80 samples, drawn into the hidden
+; buffer over four frames (15 traces a second, inside the frame budget).
+.macro SCLEAR buf
+        .local @c
+        ldx #39
+@c:     lda sc_vcol,x           ; even lines: vertical graticule dots
+        .repeat 11, I
+        sta buf+(I*2+2)*40,x
+        .endrepeat
+        lda #0                  ; odd lines: empty
+        .repeat 11, I
+        sta buf+(I*2+1)*40,x
+        .endrepeat
+        lda sc_hrow,x           ; top, centre and bottom lines
+        sta buf+0*40,x
+        sta buf+12*40,x
+        sta buf+23*40,x
+        dex
+        bpl @c
+.endmacro
+
+scope_init:
+        lda #>SCOPEB
+        sta scback
+        lda #0
+        sta scstage
+        jsr sc_clear
+        lda #>SCOPEA
+        sta scback
+        jsr sc_clear            ; A is shown, so B is drawn first
+        lda #>SCOPEB
+        sta scback
+        rts
+
+sc_clear:
+        lda scback
+        cmp #>SCOPEA
+        bne @b
+        SCLEAR SCOPEA
+        rts
+@b:     SCLEAR SCOPEB
+        rts
+
+draw_scope:                     ; 4 frames a trace: clear, then 3 thirds
+        lda scstage
+        bne @run
+        jsr sc_clear
+        jsr sc_setup
+        lda #0
+        sta scs
+        inc scstage
+        rts
+@run:   tax
+        lda sc_ends-1,x
+        sta scend
+        jsr sc_run
+        inc scstage
+        lda scstage
+        cmp #4
+        bne @x
+        lda scback              ; show it, draw into the other one next
+        sta scope_lms+2
+        eor #(>SCOPEA ^ >SCOPEB)
+        sta scback
+        jsr sc_flip
+        lda #0
+        sta scstage
+@x:     rts
+
+sc_ends:    .byte 27, 54, SCN
+
+; what each voice is doing -> level offsets, steps, shapes (self-modified)
+sc_setup:
+        lda #0
+        sta PT4
+        lda SH+3                ; 0: the lead
+        ldx NOTEIDX
+        ldy P_WAVE
+        jsr sc_voice
+        inc PT4
+        lda STEREO
+        beq @mono
+        lda SH+3+P2             ; 1: track 1 (bass), POKEY2 pair
+        ldx V_IDX
+        ldy V_PAR
+        jsr sc_voice
+        inc PT4
+        lda SH+5+P2             ; 2: track 2 (harmony), POKEY2 ch3
+        ldx V_IDX+VBS
+        ldy V_PAR+VBS
+        jsr sc_voice
+        jmp @noise
+@mono:  ldx V_IDX               ; 1: ch3, the loop voice or the lead's layer
+        lda V_EST
+        bne @mv
+        ldx NOTEIDX
+@mv:    lda SH+5
+        ldy V_PAR
+        jsr sc_voice
+        inc PT4
+        lda #0                  ; 2: nothing on a mono machine
+        tax
+        tay
+        jsr sc_voice
+@noise: lda SH+7                ; drums: the louder channel's noise
+        and #$0F
+        sta PT3
+        lda STEREO
+        beq @n1
+        lda SH+7+P2
+        and #$0F
+        cmp PT3
+        bcc @n1
+        sta PT3
+@n1:    ldx PT3
+        lda sc_noise,x
+        sta scnm
+        lsr a
+        sta scnh
+        lda scshp               ; shapes go straight into the sample loop
+        sta sm0+2
+        lda scshp+1
+        sta sm1+2
+        lda scshp+2
+        sta sm2+2
+        ldx #2
+@p:     lda scpb,x              ; start where the last trace started, then
+        sta scph,x              ;  drift the start so the wave travels
+        lda scst,x
+        asl a
+        asl a
+        clc
+        adc scst,x
+        clc
+        adc scpb,x
+        sta scpb,x
+        dex
+        bpl @p
+        lda #$FF                ; no previous sample yet
+        sta scy
+        rts
+
+sc_voice:                       ; A = AUDC image, X = note, Y = wave, PT4 = voice
+        and #$0F
+        sty PT3
+        tay
+        lda sc_lvl,y
+        asl a                   ; level * 64 = its quarter of the table
+        asl a
+        asl a
+        asl a
+        asl a
+        asl a
+        ldy PT4
+        sta scof,y
+        txa
+        and #$7F
+        tax
+        lda sc_step,x
+        sta scst,y
+        lda PT3                 ; pure tone -> sine, poly waves -> square
+        beq @sine
+        lda #>sc_square
+        bne @s
+@sine:  lda #>sc_sine
+@s:     sta scshp,y
+        rts
+
+sc_run:                         ; samples scs .. scend-1
+sc_samp:
+        lda scph
+        clc
+        adc scst
+        sta scph
+        lsr a
+        lsr a
+        ora scof
+        tax
+sm0:    lda sc_sine,x
+        sta scsum
+        lda scph+1
+        clc
+        adc scst+1
+        sta scph+1
+        lsr a
+        lsr a
+        ora scof+1
+        tax
+sm1:    lda sc_sine,x
+        clc
+        adc scsum
+        sta scsum
+        lda scph+2
+        clc
+        adc scst+2
+        sta scph+2
+        lsr a
+        lsr a
+        ora scof+2
+        tax
+sm2:    lda sc_sine,x
+        clc
+        adc scsum
+        sta scsum
+        lda scnm
+        beq @nn
+        lda RANDOM
+        and scnm
+        sec
+        sbc scnh
+        clc
+        adc scsum
+        sta scsum
+@nn:    lda #12                 ; row = 12 - sum, clipped to the screen
+        sec
+        sbc scsum
+        bmi @top
+        cmp #24
+        bcc @y
+        lda #23
+        bne @y
+@top:   lda #0
+@y:     jsr sc_plot
+        inc scs
+        lda scs
+        cmp scend
+        beq @x
+        jmp sc_samp
+@x:     rts
+
+sc_plot:                        ; A = row: a vertical run from the last row
+        ldx scy
+        cpx #$FF
+        bne @h
+        tax                     ; the first sample is a single dot
+@h:     stx PT1
+        sta scy
+        cmp PT1
+        bcs @dn
+        sta sclo
+        lda PT1
+        sta schi
+        jmp @go
+@dn:    sta schi
+        lda PT1
+        sta sclo
+@go:    lda scs
+        lsr a
+        tay                     ; byte column (2 samples a byte)
+        lda #$A0                ; PF1 pixel pair, left or right half
+        bcc @m
+        lda #$0A
+@m:     sta PT2
+        lda schi
+        sec
+        sbc sclo
+        cmp #2
+        bcs @long
+        ldx sclo                ; 1-2 rows (most samples): direct
+        lda sc_m40lo,x
+        sta PSCR
+        lda sc_m40hi,x
+        ora scback
+        sta PSCR+1
+        lda (PSCR),y
+        ora PT2
+        sta (PSCR),y
+        lda schi
+        cmp sclo
+        beq @x
+        tya
+        clc
+        adc #40
+        tay
+        lda (PSCR),y
+        ora PT2
+        sta (PSCR),y
+@x:     rts
+@long:  lda sclo                ; enter the column routine at row lo ...
+        asl a
+        asl a
+        asl a
+        clc
+        adc #<sc_col
+        sta SCV
+        lda #>sc_col
+        adc #0
+        sta SCV+1
+        lda schi                ; ... and stop it after row hi
+        clc
+        adc #1
+        asl a
+        asl a
+        asl a
+        tax
+        lda sc_col,x
+        sta scmask
+        lda #$60                ; RTS
+        sta sc_col,x
+        jsr @run
+        lda scmask
+        sta sc_col,x
+        rts
+@run:   jmp (SCV)
+
+; one block per scope row: OR the trace pixels into that row at column Y.
+; The operands address the buffer being drawn; draw_scope flips them
+; between SCOPEA and SCOPEB (they differ in bit 2 of the high byte).
+sc_col:
+        .repeat 24, K
+        lda SCOPEB+K*40,y
+        ora PT2
+        sta SCOPEB+K*40,y
+        .endrepeat
+        rts
+
+sc_flip:
+        ldx #0
+@t:     lda sc_col+2,x
+        eor #>(SCOPEA ^ SCOPEB)
+        sta sc_col+2,x
+        lda sc_col+7,x
+        eor #>(SCOPEA ^ SCOPEB)
+        sta sc_col+7,x
+        txa
+        clc
+        adc #8
+        tax
+        cpx #24*8
+        bne @t
+        rts
+
 ; ---- progress bar and clock ----------------------------------------------
 draw_prog:
         lda PLAYING
@@ -1226,11 +1559,6 @@ force_redraw:                   ; make the next draw_voices write every field
 @p:     sta SCREEN+3*40,x
         dex
         bpl @p
-        ldx #39
-        lda #0
-@h:     sta SCREEN+22*40,x
-        dex
-        bpl @h
         rts
 
 .ifdef DISK
@@ -1522,8 +1850,12 @@ draw_static:
         sta vusrc,y
         dey
         bpl @vm
-@fill:  ldx #0                  ; meter rows: all segments unlit
+@fill:  ldx #NBAR*BARROWS-1      ; meter rows: all segments unlit
         lda #G_DARK
+@g:     sta barg,x
+        dex
+        bpl @g
+        ldx #0
 @f:     sta SCREEN+5*40,x
         sta SCREEN+6*40,x
         sta SCREEN+7*40,x
@@ -1561,16 +1893,30 @@ map_mono:
 
 vusrc_st:   .byte 3,5,7,3+P2,5+P2,7+P2      ; AUDC of each metered voice
 vusrc_mo:   .byte 3,5,7,$FF,$FF,$FF
-barcol:     .byte 3,9,15,21,27,33           ; screen column of each meter
+barcol:     .byte 3,9,15,21,27,33
+bar9:       .byte 0,9,18,27,36,45           ; bar * BARROWS           ; screen column of each meter
 ledcol:     .byte 0,5,10,15,20,25,30,35
+sc_vcol:    .repeat 40, I                   ; graticule: a dot every 20 px
+            .byte (I .mod 5 = 0) * $40 + (I = 39) * $01
+            .endrepeat
+sc_hrow:    .repeat 40, I                   ; dotted top/centre/bottom lines
+            .byte $11 | ((I .mod 5 = 0) * $40)
+            .endrepeat
+sc_m40lo:   .repeat 24, I
+            .byte <(I*40)
+            .endrepeat
+sc_m40hi:   .repeat 24, I
+            .byte >(I*40)
+            .endrepeat
 vulut:      .byte 0,1,2,4,5,6,7,8,10,11,12,13,14,16,17,18
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30
 
 ; DLI color bands: 0 status, 1 progress, 2 spacer, 3-11 meters (top to
-; bottom), 12 labels, 13 percussion, 14 footer
-dpf0:   .byte $00,$00,$00, $3C,$3A,$2A,$1C,$1A,$CC,$CA,$CA,$C8, $00,$00,$00
-dpf1:   .byte $0E,$0C,$0E, $0F,$0F,$0F,$0F,$0F,$0F,$0F,$0F,$0F, $0E,$0C,$0E
-dpf2:   .byte $00,$B2,$00, $02,$02,$02,$02,$02,$02,$02,$02,$02, $00,$32,$00
+; bottom), 12 labels, 13 percussion, 14 scope (PF0 graticule, PF1 trace,
+; PF2 trace over graticule), 15 footer
+dpf0:   .byte $00,$00,$00, $3C,$3A,$2A,$1C,$1A,$CC,$CA,$CA,$C8, $00,$00,$B4,$00
+dpf1:   .byte $0E,$0C,$0E, $0F,$0F,$0F,$0F,$0F,$0F,$0F,$0F,$0F, $0E,$0C,$BE,$0E
+dpf2:   .byte $00,$B2,$00, $02,$02,$02,$02,$02,$02,$02,$02,$02, $00,$32,$BE,$00
 
 notenames:
         .byte 'C'-32,0, 'C'-32,3, 'D'-32,0, 'D'-32,3, 'E'-32,0, 'F'-32,0
@@ -1596,15 +1942,13 @@ presetnames:
         .byte 'L'-32,'A'-32,'S'-32,'E'-32,'R'-32
         .byte 'U'-32,'F'-32,'O'-32,0,0
 
-glyph_codes: .byte G_FULL,G_HALF,G_DARK,G_PEAK,G_OFF,G_BIG,G_SML,0
+glyph_codes: .byte G_FULL,G_HALF,G_DARK,G_PEAK,G_OFF,0
 glyph_data:
         .byte $00,$55,$55,$55,$55,$55,$55,$00   ; meter cell, lit
         .byte $00,$00,$00,$00,$55,$55,$55,$00   ; meter cell, half
         .byte $00,$00,$00,$FF,$FF,$00,$00,$00   ; meter cell, unlit
         .byte $00,$AA,$AA,$00,$00,$00,$00,$00   ; peak marker
         .byte $00,$00,$00,$18,$18,$00,$00,$00   ; LED / progress, dark
-        .byte $00,$3C,$7E,$7E,$7E,$7E,$3C,$00   ; trace, loud
-        .byte $00,$00,$00,$00,$18,$3C,$3C,$00   ; trace, quiet
 
 text_all:
         .byte 0,4,$00,  "POKEY",0
@@ -1614,9 +1958,9 @@ text_all:
         .byte 2,30,$00, ":",0
         .byte 2,33,$00, "/",0
         .byte 2,36,$00, ":",0
-        .byte 18,0,$00, "----------------------------------------",0
-        .byte 18,14,$00," PERCUSSION ",0
-        .byte 20,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
+        .byte 17,0,$00, "----------------------------------------",0
+        .byte 17,14,$00," PERCUSSION ",0
+        .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
         .byte 23,5,$00, "SPACE PAUSE  <> SONG  ESC STOP",0
         .byte $FF
 text_st:
@@ -1664,6 +2008,26 @@ vt0:    .res 1
 vt1:    .res 1
 vt2:    .res 1
 vt3:    .res 1
+scback: .res 1                  ; hi byte of the buffer being drawn
+scstage:.res 1
+barg:   .res NBAR*BARROWS       ; meter glyphs as drawn (skip unchanged)
+bi:     .res 1
+lastlv: .res NBAR
+lastpk: .res NBAR
+scof:   .res 3                  ; per voice: amplitude level * 64
+scshp:  .res 3                  ; per voice: wave table page                  ; 0 clear + first half, 1 second half + swap
+scph:   .res 3                  ; running phase per voice
+scpb:   .res 3                  ; phase at the start of the trace
+scst:   .res 3                  ; phase step per sample per voice
+scy:    .res 1                  ; previous sample's row
+scs:    .res 1                  ; sample index
+scend:  .res 1
+scsum:  .res 1
+scnm:   .res 1                  ; noise mask / half
+scnh:   .res 1
+sclo:   .res 1
+schi:   .res 1
+scmask: .res 1
 dsec:   .res 2
 dcnt:   .res 1
 dbuf:   .res 2
@@ -1672,6 +2036,9 @@ savst:  .res 10
 
 ; ===========================================================================
 .segment "HIDATA"
+.align 256
+.include "scope.inc"            ; its tables must be page-aligned
+.assert <sc_sine = 0 && <sc_square = 0, error, "scope tables must be page-aligned"
 .include "tables.inc"
 
 .ifndef DISK

@@ -25,13 +25,16 @@ songbank.bin: gen_songbank.py $(wildcard songs/*.psq)
 	python3 gen_songbank.py
 
 # the standalone visual song player (no PC attached)
-build/player.xex: player.s engine.inc tables.inc songbank.bin atari-player.cfg
+scope.inc: gen_scope.py
+	python3 gen_scope.py
+
+build/player.xex: player.s engine.inc tables.inc scope.inc songbank.bin atari-player.cfg
 	@mkdir -p build
 	$(CA65) -g -o build/player.o player.s
 	$(LD65) -C atari-player.cfg -Ln build/player.lbl -o $@ build/player.o
 	@ls -l $@
 
-build/player_disk.xex: player.s engine.inc tables.inc atari-player-disk.cfg
+build/player_disk.xex: player.s engine.inc tables.inc scope.inc atari-player-disk.cfg
 	@mkdir -p build
 	$(CA65) -g -D DISK -o build/player_disk.o player.s
 	$(LD65) -C atari-player-disk.cfg -Ln build/player_disk.lbl -o $@ build/player_disk.o

@@ -120,7 +120,9 @@ def screen():
 # ---------------------------------------------------------------------------
 print("== boot ==")
 steps = boot(stereo=1)
-check(mem[L("NSONG")] == 6, f"song bank found: {mem[L('NSONG')]} songs")
+import gen_songbank
+NS = len(gen_songbank.DEFAULT)
+check(mem[L("NSONG")] == NS, f"song bank found: {mem[L('NSONG')]} songs")
 check(mem[L("PLAYING")] == 1, "song 1 playing")
 check(mem[L("STREAMON")] == 1, "POKEY2 carries its own voices (no mirror)")
 vp = mem[0xF0] | mem[0xF1] << 8
@@ -131,8 +133,8 @@ check(mem[L("mapt")] == 0 and mem[L("mapt") + 2] == 4, "stereo command map loade
 scr = screen()
 check("ANTHEM" in scr[1], f"title row: {scr[1].strip()!r}")
 check("POKEY" in scr[0] and "PLAYER" in scr[0], "header row")
-check("STEREO" in scr[2] and "SONG 01 OF 06" in scr[2], f"status row: {scr[2].strip()!r}")
-check("PERCUSSION" in scr[18] and "KICK" in scr[20], "percussion panel")
+check("STEREO" in scr[2] and f"SONG 01 OF {NS:02d}" in scr[2], f"status row: {scr[2].strip()!r}")
+check("PERCUSSION" in scr[17] and "KICK" in scr[19], "percussion panel")
 
 print("\n== play ANTHEM (stereo): what the sequencer did vs the .psq ==")
 h, ev = psq.read("songs/anthem.psq")
@@ -172,6 +174,36 @@ row3 = mem[0x4000 + 3 * 40:0x4000 + 3 * 40 + 40]
 check(row3.count(0x80) == 6 and L("G_OFF") in row3,
       f"progress bar advanced {row3.count(0x80)} cells of 40")
 
+print("\n== oscilloscope ==")
+dl = L("scope_lms")
+shown = mem[dl + 2]
+cyc = []
+for _ in range(4):                      # clear, then three thirds + swap
+    c0 = m.processorCycles
+    call("draw_all")
+    cyc.append(m.processorCycles - c0)
+check(mem[dl + 2] != shown and mem[dl + 2] in (0x18, 0x1C), f"scope buffers swap (${shown:02X}00 -> ${mem[dl + 2]:02X}00)")
+buf = mem[mem[dl + 2] * 256:mem[dl + 2] * 256 + 960]
+trace = sum(1 for b in buf if b & 0xAA)
+check(trace >= 40, f"a trace is drawn: {trace} bytes carry trace pixels")
+rows_hit = {i // 40 for i, b in enumerate(buf) if b & 0xAA}
+check(len(rows_hit) >= 3, f"it moves vertically: rows {min(rows_hit)}-{max(rows_hit)}")
+worst = 0
+for _ in range(120):                    # two seconds of the song, frame by frame
+    call("vbi")
+    c0 = m.processorCycles
+    call("draw_all")
+    worst = max(worst, m.processorCycles - c0)
+print(f"     draw_all cycles: first trace {cyc}, worst of 120 frames {worst}")
+check(worst < 14500, "the panel fits the frame (hardware kept pace at 13.7k: see hwplayer.py)")
+if V:
+    for r in range(24):
+        line = ""
+        for b in buf[r * 40:r * 40 + 40]:
+            for k in (6, 4, 2, 0):
+                line += " .#*"[(b >> k) & 3]
+        print("|" + line[:160] + "|")
+
 print("\n== keys ==")
 mem[0xD20F] = 0xFB                      # a key is down
 mem[0xD209] = L("K_GT")                 # '>' next song
@@ -203,8 +235,8 @@ mem[0xD20F] = 0xFF
 call("read_keys")
 
 print("\n== end of song rolls on to the next ==")
-mem[L("SONGN")] = 5                     # SMB109: the short one
-call("song_load", a=5)
+last = NS - 1                           # SMB 1-09: the short one, last
+call("song_load", a=last)
 n = 0
 while mem[L("PLAYING")] and n < 4000:
     call("seq_step")

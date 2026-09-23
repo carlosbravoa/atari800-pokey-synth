@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Hardware check of POKEY PLAYER: real key presses, verified by peeks.
-> next song, < previous, SPACE pause/resume, RETURN replay, song liveness."""
+> next song, < previous, SPACE pause/resume, RETURN replay, song liveness,
+and the panel keeping pace with the frame rate (DRAWN vs RTCLOK)."""
 import sys, time
 sys.path.insert(0, "/home/carlos/devel/fpga/atari800_tang_nano20k_parallel/tools")
 from atari_link import AtariLink
@@ -41,4 +42,10 @@ with AtariLink() as l:
     check(a[4] == 0 and pos(b) > pos(a), "SPACE resumes")
     l.key(RET, hold_ms=80); time.sleep(0.5)
     check(pos(st()) < 60, f"RETURN replays from the top (SPOS {pos(st())})")
+    # the panel (meters + scope) must keep up: one main-loop pass per frame
+    f0 = l.peek(0x12, 3); d0 = l.peek(0x0BC1, 1)[0]
+    time.sleep(4)
+    f1 = l.peek(0x12, 3); d1 = l.peek(0x0BC1, 1)[0]
+    rt = ((f1[1] * 256 + f1[2]) - (f0[1] * 256 + f0[2])) % 65536
+    check((rt - (d1 - d0)) % 256 == 0, f"no dropped frames ({rt} frames, DRAWN kept pace)")
 print("ALL PASS" if ok else "FAILURES")

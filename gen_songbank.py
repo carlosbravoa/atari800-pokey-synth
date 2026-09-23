@@ -30,12 +30,13 @@ BANK_SIZE = 0xA000 - BASE       # $5000-$9FFF
 ENT = 24
 RATE = 59.92
 
-# the 5-rated set, in the order they play (see songs/ratings.md)
-DEFAULT = ["anthem", "kalinka", "dbztheme", "MetalstormLvl3", "Dbz2", "smb109"]
+# five full-length album songs (songs/album/) that fit the 20 KB together
+DEFAULT = ["anthem", "kalinka", "MetalstormLvl3", "Dbz2", "smb109"]
 
 
 def resolve(name):
-    for p in (name, os.path.join(HERE, "songs", name),
+    for p in (name, os.path.join(HERE, "songs", "album", name + ".psq"),
+              os.path.join(HERE, "songs", name),
               os.path.join(HERE, "songs", name + ".psq")):
         if os.path.exists(p):
             return p
