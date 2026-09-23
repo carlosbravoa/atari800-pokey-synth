@@ -33,6 +33,7 @@ mem[0xD20F] = 0xFF
 DSKINV = 0xE453
 mem[DSKINV] = 0x60
 reads = []
+dl_at_read = []                          # SDLSTL at each sector read
 SENT = 0xFFF0
 mem[SENT] = 0xEA
 ok = True
@@ -45,7 +46,10 @@ def check(c, msg):
 
 
 def step():
+    if L("wait_frame") <= m.pc < L("wait_frame") + 12:   # the OS clock ticks
+        mem[0x14] = (mem[0x14] + 1) & 255
     if m.pc == DSKINV:                   # serve the sector, then RTS
+        dl_at_read.append(mem[0x0230] | mem[0x0231] << 8)
         sec = mem[0x030A] | mem[0x030B] << 8
         buf = mem[0x0304] | mem[0x0305] << 8
         reads.append(sec)
@@ -119,6 +123,39 @@ for i, name in enumerate(DISK_SONGS):
         bad.append((name, same, got, exp))
 check(not bad, f"all {len(DISK_SONGS)} songs load byte-exact and play their first 5 s"
       + (f": {bad}" if bad else ""))
+
+# ---- the LOADING screen covers every read, then gives the panel back ----
+def m7(line):
+    return "".join(chr(32 + (c & 0x3F)) for c in line)
+
+
+dl_at_read.clear()
+mem[0x0230] = mem[0x0231] = 0
+seen = {}
+orig = step
+
+
+def watch():
+    # snapshot the loading screen halfway through the load
+    if m.pc == DSKINV and len(dl_at_read) == 20:
+        seen["lines"] = [m7(mem[0x1000 + 20 * r:0x1000 + 20 * r + 20]) for r in range(4)]
+
+
+def step():
+    watch()
+    orig()
+
+
+call(L("song_load"), a=1)
+check(dl_at_read and all(a == L("dlist_load") for a in dl_at_read),
+      f"all {len(dl_at_read)} sectors read behind the LOADING screen")
+lines = seen.get("lines", ["", "", "", ""])
+print("     " + " | ".join(lines))
+check("LOADING" in lines[0] and lines[1].strip() and "SONG 02 OF" in lines[3],
+      "it shows LOADING, the title and the song number")
+bar = mem[0x1000 + 40:0x1000 + 60]
+check(all(b == (6 | 0xC0) for b in bar), "the bar is full when the song has loaded")
+check((mem[0x0230] | mem[0x0231] << 8) == L("dlist"), "the panel is back afterwards")
 
 # ---- a bad disk: the catalog read fails -> no songs, no crash -------------
 disk = bytes(3 * SS)                     # only the boot sectors exist

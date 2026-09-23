@@ -47,6 +47,9 @@ CAT      = $0C00        ; catalog, read from sectors CATSEC.. at startup
 CATSEC   = 4
 CATN     = 8            ; 8 x 128 bytes: up to 42 songs
 LOADING  = $0BC0        ; 1 = SIO owns POKEY: the VBI keeps its hands off
+LSCR     = $1000        ; the loading screen: 4 mode-7 lines of 20
+G_SOLID  = 6            ; loading bar: a filled cell (mode 7)
+G_HOLE   = 7            ;              an empty one
 SOUNDR   = $41
 DDEVIC   = $0300
 DUNIT    = $0301
@@ -142,6 +145,20 @@ scope_lms:                                              ; 20-22: the scope,
         .byte $8E                                       ;  last line   +DLI
         .byte $42,<(SCREEN+23*40),>(SCREEN+23*40)       ; 23 keys
         .byte $41,<dlist,>dlist
+
+.ifdef DISK
+; between songs: a big LOADING screen instead of a frozen panel
+dlist_load:
+        .res  8,$70
+        .byte $47,<LSCR,>LSCR                           ; LOADING
+        .byte $70,$70
+        .byte $07                                       ; the song's title
+        .byte $70,$70
+        .byte $07                                       ; the bar
+        .byte $70,$70
+        .byte $07                                       ; SONG nn OF nn
+        .byte $41,<dlist_load,>dlist_load
+.endif
 
 ; ===========================================================================
 .segment "CODE"
@@ -1613,7 +1630,8 @@ disk_read:
 @s:     inc dsec
         bne @c
         inc dsec+1
-@c:     dec dcnt
+@c:     jsr load_tick
+        dec dcnt
         bne @sec
         jsr snd_back
         clc
@@ -1639,7 +1657,18 @@ read_catalog:
         sta dsec+1
         lda #CATN
         sta dcnt
+        ldx #19
+@tt:    lda m7_list,x           ; "SONG LIST" / "POKEY PLAYER"
+        sta LSCR+20,x
+        lda m7_foot,x
+        sta LSCR+60,x
+        dex
+        bpl @tt
+        jsr load_screen
         jsr disk_read
+        php
+        jsr load_hide
+        plp
         bcc @x
         lda #0                  ; unreadable: no songs
         sta CAT
@@ -1648,33 +1677,123 @@ read_catalog:
         jsr print_list
 @x:     rts
 
-load_song:                      ; dsec/dcnt -> SONGS, "LOADING" meanwhile
-        ldx #9
-@sv:    lda SCREEN+2*40+16,x
-        sta savst,x
+load_song:                      ; dsec/dcnt -> SONGS, behind the LOADING screen
+        ldx #19                 ; title line: the song's name, centred
+@t:     lda #0
+        sta LSCR+20,x
+        lda m7_song,x           ; footer: "SONG    OF"
+        sta LSCR+60,x
         dex
-        bpl @sv
-        lda #<text_load
-        ldx #>text_load
-        jsr print_list
+        bpl @t
+        ldx #15                 ; the title's length, trailing spaces off
+@len:   lda SCREEN+40+2,x
+        and #$3F
+        bne @got
+        dex
+        bpl @len
+@got:   inx
+        stx PT1
+        beq @nt
+        lda #20
+        sec
+        sbc PT1
+        lsr a
+        tay                     ; centred
+        ldx #0
+@n:     lda SCREEN+40+2,x       ; (already in mode-7 pink)
+        sta LSCR+20,y
+        iny
+        inx
+        cpx PT1
+        bne @n
+@nt:
+        lda #<(LSCR+60+8)
+        sta PSCR
+        lda #>(LSCR+60+8)
+        sta PSCR+1
+        lda SONGN
+        clc
+        adc #1
+        ldy #0
+        jsr put_2dig
+        lda NSONG
+        ldy #6
+        jsr put_2dig
+        ldx #7                  ; the digits in the footer's blue
+@b:     lda LSCR+60+8,x
+        cmp #$10
+        bcc @nb
+        ora #$40
+        sta LSCR+60+8,x
+@nb:    dex
+        bpl @b
+        jsr load_screen
         lda #<SONGS
         sta dbuf
         lda #>SONGS
         sta dbuf+1
         jsr disk_read
+        php
+        jsr load_hide
+        plp
         bcs @err
-        ldx #9
-@rs:    lda savst,x
-        sta SCREEN+2*40+16,x
-        dex
-        bpl @rs
-        clc
         rts
 @err:   lda #<text_err
         ldx #>text_err
         jsr print_list
         sec
         rts
+
+load_screen:                    ; LOADING + empty bar, then show it (the caller
+        ldx #19                 ;  has written the title and footer lines)
+@t:     lda m7_load,x
+        sta LSCR,x
+        lda #G_HOLE|$40         ; empty cells, blue
+        sta LSCR+40,x
+        dex
+        bpl @t
+        lda #0
+        sta lbacc
+        sta lbcell
+        lda dcnt
+        sta lbtot
+        lda #1
+        sta lshow
+        lda #<dlist_load
+        sta SDLSTL
+        lda #>dlist_load
+        sta SDLSTL+1
+        jmp wait_frame          ; on screen before SIO holds off the OS VBI
+
+load_hide:
+        lda #0
+        sta lshow
+        lda #<dlist
+        sta SDLSTL
+        lda #>dlist
+        sta SDLSTL+1
+        rts
+
+load_tick:                      ; a sector arrived: 20 cells over lbtot sectors
+        lda lshow
+        beq @x
+        clc
+        lda lbacc
+        adc #20
+        sta lbacc
+@w:     lda lbacc
+        cmp lbtot
+        bcc @x
+        sbc lbtot
+        sta lbacc
+        ldx lbcell
+        cpx #20
+        bcs @w
+        lda #G_SOLID|$C0        ; filled, green
+        sta LSCR+40,x
+        inc lbcell
+        jmp @w
+@x:     rts
 .endif
 
 ; ---------------------------------------------------------------------------
@@ -1942,13 +2061,15 @@ presetnames:
         .byte 'L'-32,'A'-32,'S'-32,'E'-32,'R'-32
         .byte 'U'-32,'F'-32,'O'-32,0,0
 
-glyph_codes: .byte G_FULL,G_HALF,G_DARK,G_PEAK,G_OFF,0
+glyph_codes: .byte G_FULL,G_HALF,G_DARK,G_PEAK,G_OFF,6,7,0
 glyph_data:
         .byte $00,$55,$55,$55,$55,$55,$55,$00   ; meter cell, lit
         .byte $00,$00,$00,$00,$55,$55,$55,$00   ; meter cell, half
         .byte $00,$00,$00,$FF,$FF,$00,$00,$00   ; meter cell, unlit
         .byte $00,$AA,$AA,$00,$00,$00,$00,$00   ; peak marker
         .byte $00,$00,$00,$18,$18,$00,$00,$00   ; LED / progress, dark
+        .byte $00,$7E,$7E,$7E,$7E,$7E,$7E,$00   ; 6: loading bar, filled
+        .byte $00,$7E,$42,$42,$42,$42,$7E,$00   ; 7: loading bar, empty
 
 text_all:
         .byte 0,4,$00,  "POKEY",0
@@ -1973,9 +2094,19 @@ text_st:
         .byte 14,33,$00,"DRUM",0
         .byte $FF
 .ifdef DISK
-text_load:
-        .byte 2,16,$80, "LOADING   ",0
-        .byte $FF
+.macro M7 str, col               ; a 20-cell mode-7 line, in one color
+        .repeat 20, I
+        .if I < .strlen(str)
+        .byte ((.strat(str, I) - 32) & $3F) | col
+        .else
+        .byte 0
+        .endif
+        .endrepeat
+.endmacro
+m7_load:    M7 "      LOADING", $00
+m7_list:    M7 "     SONG LIST", $80
+m7_foot:    M7 "    POKEY PLAYER", $40
+m7_song:    M7 "   SONG    OF", $40
 text_err:
         .byte 2,16,$80, "DISK ERROR",0
         .byte $FF
@@ -2032,7 +2163,10 @@ dsec:   .res 2
 dcnt:   .res 1
 dbuf:   .res 2
 dtry:   .res 1
-savst:  .res 10
+lshow:  .res 1                  ; the LOADING screen is up
+lbtot:  .res 1
+lbacc:  .res 1
+lbcell: .res 1
 
 ; ===========================================================================
 .segment "HIDATA"

@@ -203,6 +203,13 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   each at most 160 sectors. Songs load into $5000 through DSKINV.
   LOADING $0BC0 keeps the VBI off POKEY while SIO uses it, and `snd_back`
   restores AUDCTL/SKCTL afterwards.
+- **LOADING screen** (disk build): while sectors load, SDLSTL points at
+  `dlist_load`, four mode-7 lines at LSCR $1000 (LOADING, the centred
+  title, a 20-cell bar filled per sector by `load_tick`, SONG nn OF nn).
+  `load_screen` waits a frame so the OS VBI has switched the display list
+  before SIO starts (CRITIC skips the shadow copy during a transfer). The
+  frozen panel used to look like a crash. The catalog read at boot uses it
+  too ("SONG LIST").
 - The firmware mounts any ATR size, but the bridge can't mount one: `atari.py
   send build/pokeyplayer.atr POKEYPLR.ATR` puts it on the SD, and a person
   mounts it on D1: from the OSD and boots.
