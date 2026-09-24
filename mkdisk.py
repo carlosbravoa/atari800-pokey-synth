@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Build build/pokeyplayer.atr: a bootable POKEY PLAYER disk, no PC needed.
 
-    python3 mkdisk.py [song ...]          # default: the album (album.py)
+    python3 mkdisk.py [song ...]          # default: disk.py's list
 
 Single density (128-byte sectors), at least 720 sectors:
     1-3     boot loader (boot.s), patched with where the player lives
-    4-11    catalog: count byte + 24 bytes per song (max 42)
+    4-13    catalog: count byte + 24 bytes per song (max 53)
               title(16, screen codes) first-sector(2) frames-per-progress-
               cell(2) minutes seconds mode sectors
-    12..    the player (build/player_disk.xex, a normal binary-load file)
+    14..    the player (build/player_disk.xex, a normal binary-load file)
     then    each song's .psq event stream, starting on a sector boundary,
             at most 160 sectors (the $5000-$9FFF buffer)
 The player reads the catalog at boot and loads a song when it's picked.
@@ -20,25 +20,25 @@ import psq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SS = 128
-CATSEC, CATN = 4, 8
+CATSEC, CATN = 4, 10
 ENT = 24
 MAXSEC = (0xA000 - 0x5000) // SS
 RATE = 59.92
 
-def album_paths():
-    """the album (album.py), in its order, from songs/album/"""
-    import album
-    return [os.path.join(album.OUT, name + ".psq") for name, _, _ in album.ALBUM]
+def disk_songs():
+    """the chosen songs (disk.py), alphabetical: [(path, title)]"""
+    import disk
+    return disk.songs()
 
 
-DISK_SONGS = album_paths()
+DISK_SONGS = [p for p, _ in disk_songs()]
 
 
 def sectors(data):
     return (len(data) + SS - 1) // SS
 
 
-def build(names, out="build/pokeyplayer.atr"):
+def build(names, out="build/pokeyplayer.atr", titles=None):
     boot = bytearray(open(os.path.join(HERE, "build/boot.bin"), "rb").read())
     xex = open(os.path.join(HERE, "build/player_disk.xex"), "rb").read()
     assert len(boot) == 3 * SS
@@ -51,6 +51,8 @@ def build(names, out="build/pokeyplayer.atr"):
         path = name if os.path.exists(name) else os.path.join(HERE, "songs", name + ".psq")
         name = os.path.basename(path)[:-4]
         h, _ = psq.read(path)
+        if titles and path in titles:        # disk.py's title wins
+            h["title"] = titles[path]
         body = open(path, "rb").read()[32:]
         if sectors(body) > MAXSEC:
             print(f"  skipped {name}: {len(body)} bytes is over the 20 KB buffer")
@@ -96,4 +98,7 @@ def build(names, out="build/pokeyplayer.atr"):
 
 
 if __name__ == "__main__":
-    build(sys.argv[1:] or DISK_SONGS)
+    if sys.argv[1:]:
+        build(sys.argv[1:])
+    else:
+        build(DISK_SONGS, titles=dict(disk_songs()))

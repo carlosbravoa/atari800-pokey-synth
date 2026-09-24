@@ -156,6 +156,13 @@ check(v1 == want.get(4, 0) & 255, f"voice 1 note-ons {v1} == {want.get(4, 0)}")
 check(dr == (want.get(6, 0) + want.get(7, 0)) & 255,
       f"drum hits {dr} == {want.get(6, 0) + want.get(7, 0)}")
 
+print("\n== stereo percussion: drum channel 2 mirrors channel 1 ==")
+peak2 = 0
+for _ in range(120):
+    call("vbi")
+    peak2 = max(peak2, mem[0x0B78 + 0x17] & 15)
+check(peak2 > 0 and mem[L("dr2used")] == 0, f"POKEY2 ch4 sounds the drums too (volume up to {peak2})")
+
 print("\n== the panel while it plays ==")
 for _ in range(30):
     frame()

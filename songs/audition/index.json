@@ -1,0 +1,150 @@
+{
+ "Adventure_Island_II-Overworld_1": {
+  "midi": "/home/carlos/Music/seleccion/Adventure_Island_II-Overworld_1.mid",
+  "title": "ADV ISLAND 2"
+ },
+ "contra-1": {
+  "midi": "/home/carlos/Music/seleccion/contra-1.mid",
+  "title": "CONTRA"
+ },
+ "corneria": {
+  "midi": "/home/carlos/Music/seleccion/corneria.mid",
+  "title": "CORNERIA"
+ },
+ "corridor": {
+  "midi": "/home/carlos/Music/seleccion/corridor.mid",
+  "title": "CORRIDOR"
+ },
+ "ct600ad": {
+  "midi": "/home/carlos/Music/seleccion/ct600ad.mid",
+  "title": "CHRONO 600 AD"
+ },
+ "cv1-1b": {
+  "midi": "/home/carlos/Music/seleccion/cv1-1b.mid",
+  "title": "CASTLEVANIA"
+ },
+ "ddstage": {
+  "midi": "/home/carlos/Music/seleccion/ddstage.mid",
+  "title": "DOUBLE DRAGON"
+ },
+ "ddtheme": {
+  "midi": "/home/carlos/Music/seleccion/ddtheme.mid",
+  "title": "DOUBLE DRAGON TH"
+ },
+ "DocMarTune": {
+  "midi": "/home/carlos/Music/seleccion/DocMarTune.mid",
+  "title": "DR MARIO"
+ },
+ "ff336": {
+  "midi": "/home/carlos/Music/seleccion/ff336.mid",
+  "title": "FF3 336"
+ },
+ "ff3jbatt": {
+  "midi": "/home/carlos/Music/seleccion/ff3jbatt.mid",
+  "title": "FF3 BATTLE"
+ },
+ "ff3PRELUDE": {
+  "midi": "/home/carlos/Music/seleccion/ff3PRELUDE.mid",
+  "title": "FF PRELUDE"
+ },
+ "Level5": {
+  "midi": "/home/carlos/Music/seleccion/Level5.mid",
+  "title": "LEVEL5"
+ },
+ "MM1-_Elecman": {
+  "midi": "/home/carlos/Music/seleccion/MM1-_Elecman.mid",
+  "title": "ELEC MAN"
+ },
+ "mm2air": {
+  "midi": "/home/carlos/Music/seleccion/mm2air.mid",
+  "title": "AIR MAN"
+ },
+ "mm3magnt_2": {
+  "midi": "/home/carlos/Music/seleccion/mm3magnt_2.mid",
+  "title": "MAGNET MAN"
+ },
+ "MM4Skull": {
+  "midi": "/home/carlos/Music/seleccion/MM4Skull.mid",
+  "title": "SKULL MAN"
+ },
+ "mmx01": {
+  "midi": "/home/carlos/Music/seleccion/mmx01.mid",
+  "title": "MEGA MAN X"
+ },
+ "ng2stg11": {
+  "midi": "/home/carlos/Music/seleccion/ng2stg11.mid",
+  "title": "NINJA GAIDEN 2"
+ },
+ "NinjaBro": {
+  "midi": "/home/carlos/Music/seleccion/NinjaBro.mid",
+  "title": "NINJA BROS"
+ },
+ "Nintendo_World_Cup_-_Golden_Goal": {
+  "midi": "/home/carlos/Music/seleccion/Nintendo_World_Cup_-_Golden_Goal.mid",
+  "title": "WORLD CUP GOAL"
+ },
+ "Puyo-Puyo-Tsu-Remix-By-Matthew": {
+  "midi": "/home/carlos/Music/seleccion/Puyo-Puyo-Tsu-Remix-By-Matthew.mid",
+  "title": "PUYO PUYO TSU"
+ },
+ "RR_Music1": {
+  "midi": "/home/carlos/Music/seleccion/RR_Music1.mid",
+  "title": "RR MUSIC 1"
+ },
+ "sdb-london": {
+  "midi": "/home/carlos/Music/seleccion/sdb-london.mid",
+  "title": "SDB LONDON"
+ },
+ "sf2ken": {
+  "midi": "/home/carlos/Music/seleccion/sf2ken.mid",
+  "title": "SF2 KEN"
+ },
+ "sf2Ryu456": {
+  "midi": "/home/carlos/Music/seleccion/sf2Ryu456.mid",
+  "title": "SF2 RYU"
+ },
+ "sm3ow2": {
+  "midi": "/home/carlos/Music/seleccion/sm3ow2.mid",
+  "title": "SMB3 WORLD 2"
+ },
+ "smb2overworld1": {
+  "midi": "/home/carlos/Music/seleccion/smb2overworld1.mid",
+  "title": "SMB2 OVERWORLD"
+ },
+ "Smbtheme": {
+  "midi": "/home/carlos/Music/seleccion/Smbtheme.mid",
+  "title": "SUPER MARIO"
+ },
+ "smwwd1": {
+  "midi": "/home/carlos/Music/seleccion/smwwd1.mid",
+  "title": "SUPER MARIO WLD"
+ },
+ "SRnR_-_Stage_01": {
+  "midi": "/home/carlos/Music/seleccion/SRnR_-_Stage_01.mid",
+  "title": "SRNR STAGE 1"
+ },
+ "St-Seiya": {
+  "midi": "/home/carlos/Music/seleccion/St-Seiya.mid",
+  "title": "SAINT SEIYA"
+ },
+ "tetris-1": {
+  "midi": "/home/carlos/Music/seleccion/tetris-1.mid",
+  "title": "TETRIS"
+ },
+ "topgear1": {
+  "midi": "/home/carlos/Music/seleccion/topgear1.mid",
+  "title": "TOP GEAR"
+ },
+ "Tyrian_-_The_Level": {
+  "midi": "/home/carlos/Music/seleccion/Tyrian_-_The_Level.mid",
+  "title": "TYRIAN"
+ },
+ "wily9": {
+  "midi": "/home/carlos/Music/seleccion/wily9.mid",
+  "title": "WILY STAGE"
+ },
+ "z1overw": {
+  "midi": "/home/carlos/Music/seleccion/z1overw.mid",
+  "title": "ZELDA"
+ }
+}

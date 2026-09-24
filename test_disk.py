@@ -20,6 +20,7 @@ for line in open("build/player_disk.lbl"):
     _, a, n = line.split()
     lbl[n.lstrip(".")] = int(a, 16)
 L = lbl.__getitem__
+LSCR = 0x1C00                            # the loading screen (in SCOPEB)
 PAGE6 = dict(PLAYING=0x0644, SONGN=0x0645, NSONG=0x0646, SEVN=0x0647,
              NOTECNT=0x0623, NOTE2CNT=0x066D, NOTE3CNT=0x0672, DRUMCNT=0x0624,
              STEREO=0x0673, LOADING=0x0BC0)
@@ -156,7 +157,9 @@ orig = step
 def watch():
     # snapshot the loading screen halfway through the load
     if m.pc == DSKINV and len(dl_at_read) == 20:
-        seen["lines"] = [m7(mem[0x1000 + 20 * r:0x1000 + 20 * r + 20]) for r in range(4)]
+        seen["lines"] = [m7(mem[LSCR + 20 * r:LSCR + 20 * r + 20]) for r in range(4)]
+    if m.pc == L("load_hide") and "bar" not in seen:     # loading just ended
+        seen["bar"] = list(mem[LSCR + 40:LSCR + 60])
 
 
 def step():
@@ -171,8 +174,8 @@ lines = seen.get("lines", ["", "", "", ""])
 print("     " + " | ".join(lines))
 check("LOADING" in lines[0] and lines[1].strip() and "SONG 02 OF" in lines[3],
       "it shows LOADING, the title and the song number")
-bar = mem[0x1000 + 40:0x1000 + 60]
-check(all(b == (6 | 0xC0) for b in bar), "the bar is full when the song has loaded")
+bar = seen.get("bar", [])
+check(len(bar) == 20 and all(b == (6 | 0xC0) for b in bar), "the bar is full when the song has loaded")
 check((mem[0x0230] | mem[0x0231] << 8) == L("dlist"), "the panel is back afterwards")
 
 # ---- the song list: page through all the songs, pick one from disk ------
@@ -199,8 +202,12 @@ press("L")
 check(mem[L("liston")] == 1 and f"OF {n}" in lrow(0), f"the list opens: {lrow(0).strip()!r}")
 press("RIGHT")
 check(mem[L("lsel")] == 20 and mem[L("ltop")] <= 20 <= mem[L("ltop")] + 19, "a page down: song 21 on screen")
-press("RIGHT")
-check(mem[L("lsel")] == n - 1 and mem[L("ltop")] == n - 20, f"another: the last song, window {mem[L('ltop')] + 1}-{mem[L('ltop')] + 20}")
+pages = 1
+while mem[L("lsel")] != n - 1 and pages < 5:
+    press("RIGHT")
+    pages += 1
+check(mem[L("lsel")] == n - 1 and mem[L("ltop")] == n - 20,
+      f"{pages} page-downs reach the last song, window {mem[L('ltop')] + 1}-{mem[L('ltop')] + 20}")
 check(f"{n:02d}" in lrow(21), f"row 21 shows song {n}: {lrow(21).strip()!r}")
 dl_at_read.clear()
 press("RET")

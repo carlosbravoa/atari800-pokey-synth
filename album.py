@@ -48,7 +48,7 @@ ALBUM = [
     ("Dbz2", "DBZ2", "rated"),
     ("ng2_act", "NINJA GAIDEN 2", "rated"),
     ("smb109", "SMB 1-09", "rated"),
-    ("temp", "TEMP", "rated"),
+    ("temp", "X-WEEKEND", "rated"),          # X Japan, Weekend (single-part file)
     ("smkrainbow", "RAINBOW ROAD", "rated"),
     ("battletoads_turbo", "TURBO TUNNEL", "rated"),
     ("sdb-titl", "SDB TITLE", "rated"),
@@ -77,6 +77,24 @@ def convert(mid, out, title, args):
     if r.returncode != 0:
         raise RuntimeError((r.stdout + r.stderr).strip().splitlines()[-1])
     return r.stdout
+
+
+def fit(mid, out, title, args):
+    """convert at full length; cut to the longest length that fits the
+    player's 20 KB buffer. -> (note, warnings, converter output)"""
+    text = convert(mid, out, title, args)
+    warn = "; ".join(l.strip() for l in text.splitlines() if l.strip().startswith("!"))
+    note = ""
+    if body_size(out) > LIMIT:
+        full = length(out)
+        end = full * LIMIT / body_size(out) * 0.97
+        while True:
+            convert(mid, out, title, args + ["--end", f"{end:.1f}"])
+            if body_size(out) <= LIMIT:
+                break
+            end *= 0.95
+        note = f"cut to {end:.0f} s of {full:.0f} s"
+    return note, warn, text
 
 
 def picks(text):
@@ -129,17 +147,7 @@ def build():
             args = []
             if how == "rated":          # the parts of the rated 50 s window
                 args = picks(convert(mid, tmp, title, ["--end", "50"]))
-            text = convert(mid, out, title, args)
-            warn = "; ".join(l.strip() for l in text.splitlines() if l.strip().startswith("!"))
-            if body_size(out) > LIMIT:  # cut to the longest length that fits
-                full = length(out)
-                end = full * LIMIT / body_size(out) * 0.97
-                while True:
-                    convert(mid, out, title, args + ["--end", f"{end:.1f}"])
-                    if body_size(out) <= LIMIT:
-                        break
-                    end *= 0.95
-                note = f"cut to {end:.0f} s of {full:.0f} s"
+            note, warn, _ = fit(mid, out, title, args)
         if how == "rated":              # the full song must begin as rated
             same = window(out) == window(os.path.join(HERE, "songs", name + ".psq"))
             note += "" if same else " (converter changed since it was rated)"

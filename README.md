@@ -58,7 +58,7 @@ compressed so every note shows a few cycles.
 **From a disk:** copy `build/pokeyplayer.atr` to the SD card, mount it on
 D1: and cold-boot. The screen turns blue while the loader reads the player.
 The player then reads the song list and loads each song from disk when you
-pick it. The disk holds the album: 37 songs, about an hour.
+pick it. The disk holds 53 songs, about 1 hour 45 minutes.
 
 Releases on GitHub carry both programs ready to run: `POKEY-SYNTH.xex`
 and the `POKEY-PLAYER.atr` disk.
@@ -66,24 +66,30 @@ and the `POKEY-PLAYER.atr` disk.
 **As a .xex:** `build/player.xex` has five songs built in, which is all that
 fits in memory. `make playerdeploy` puts it on the board over the PC link.
 
-## The album
+## The disk's songs
 
-`album.py` lists every song on the disk and converts them all at full
-length into `songs/album/`. `mkdisk.py` then builds the disk from that list.
+The disk holds 53 songs, alphabetical, all chosen by ear on the real
+machine. `disk.py` lists them: the yays, then fillers that take whatever
+slots are left (the catalog holds 53). Each entry points at the exact
+conversion that was approved.
+
+To audition a folder of MIDIs, one song at a time on the Atari:
 
 ```bash
-python3 album.py     # convert (prints length, size and any warnings per song)
-python3 mkdisk.py    # build/pokeyplayer.atr from the album
+python3 audition.py convert ~/Music/newsongs    # all of them -> songs/audition/
+python3 audition.py next yay                    # starts the first one; then
+python3 audition.py next yay|nay|maybe          #  your verdict + the next song
 ```
 
-- Songs marked `rated` were rated 4-5 while listening to their first 50
-  seconds. Their full versions use the same parts the converter picks for
-  those 50 seconds.
-- Songs marked `new` haven't been rated yet.
-- A song too long for the 20 KB buffer is cut at the longest length that
-  fits, and the table says so.
-- To add a song, add a line to `ALBUM` in `album.py` and run both commands.
-  That's the easy way to do step 4 below.
+Each song plays alone in the real player, so you hear exactly what the disk
+would play. Verdicts land in `songs/audition/verdicts.json`. For a song
+with the wrong parts, add hand-picked parts to `FIXES` in `audition.py`
+(from `midi2psq.py FILE --inspect`), run `audition.py fixes FOLDER` and
+review them with `audition.py --fixes next ...`. Then add the approved files
+to `disk.py` and run `python3 mkdisk.py`.
+
+`album.py` made the first album's full-length conversions and is kept as
+their record.
 
 ## Putting your own MIDI songs on the disk
 
@@ -132,6 +138,8 @@ Useful options:
 | `--transpose N` | shift every note by N semitones |
 | `--preset-lead P` (also `-bass`, `-harm`, `-voice4`) | choose the instrument: PIANO ORGAN FLUTE STRINGS BASS CHIPARP SYNTH BELL LASER UFO |
 | `--lead 5:4,3:2` | several parts feed one voice. The first one wins when both play |
+| `--octave-bass N` (also `-lead`, `-harm`, `-voice4`) | move one part by N octaves (e.g. `-1` for a deeper bass) |
+| `--no-drop` | keep the harmony at its written octave (sometimes sounds better than the tuned-down default) |
 | `--no-double`, `--echo N` | control the octave double and echo added to single-part songs |
 
 ### 3. Listen before you commit to it (optional, needs the PC link)

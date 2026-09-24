@@ -1,0 +1,47 @@
+{
+ "ddtheme": {
+  "midi": "/home/carlos/Music/seleccion/ddtheme.mid",
+  "title": "DOUBLE DRAGON TH",
+  "options": "--lead 1:2 --bass 1:3 --harm 1:4 --drums 1:10"
+ },
+ "MM1-_Elecman": {
+  "midi": "/home/carlos/Music/seleccion/MM1-_Elecman.mid",
+  "title": "ELEC MAN",
+  "options": "--lead 2:11 --bass 4:13 --harm 3:12 --drums 5:10"
+ },
+ "mm3magnt_2": {
+  "midi": "/home/carlos/Music/seleccion/mm3magnt_2.mid",
+  "title": "MAGNET MAN",
+  "options": "--lead 2:1 --bass 5:4 --harm 3:2,4:3 --drums 6:10"
+ },
+ "Nintendo_World_Cup_-_Golden_Goal": {
+  "midi": "/home/carlos/Music/seleccion/Nintendo_World_Cup_-_Golden_Goal.mid",
+  "title": "WORLD CUP GOAL",
+  "options": "--lead 2:1 --bass 7:6 --harm 4:3"
+ },
+ "Puyo-Puyo-Tsu-Remix-By-Matthew": {
+  "midi": "/home/carlos/Music/seleccion/Puyo-Puyo-Tsu-Remix-By-Matthew.mid",
+  "title": "PUYO PUYO TSU",
+  "options": "--lead 4:3,5:4 --bass 8:7 --harm 3:2 --voice4 13:12,12:11 --drums 11:10"
+ },
+ "sf2ken": {
+  "midi": "/home/carlos/Music/seleccion/sf2ken.mid",
+  "title": "SF2 KEN",
+  "options": "--lead 6:5,3:2 --bass 8:7,7:6,2:1 --harm 4:3 --voice4 5:4 --drums 10:10,11:10,12:10"
+ },
+ "corridor": {
+  "midi": "/home/carlos/Music/seleccion/corridor.mid",
+  "title": "CORRIDOR OF TIME",
+  "options": "--lead 2:1 --bass 3:2 --harm 5:4,4:3 --no-drop"
+ },
+ "wily9": {
+  "midi": "/home/carlos/Music/seleccion/wily9.mid",
+  "title": "WILY STAGE",
+  "options": "--lead 2:1 --bass 10:4 --harm 11:11 --voice4 5:7 --drums 17:10"
+ },
+ "RR_Music1": {
+  "midi": "/home/carlos/Music/seleccion/RR_Music1.mid",
+  "title": "RR MUSIC 1",
+  "options": "--lead 2:1 --bass 3:2 --harm 5:3 --drums 4:10 --octave-bass -1"
+ }
+}

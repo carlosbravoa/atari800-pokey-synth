@@ -240,6 +240,15 @@ def auto_pick(mid, start=0.0, end=0.0):
         print("  (no percussion channel; using " +
               ", ".join(f"{x.spec} prog {x.prog}" for x in perc) + " as drums)")
     mel = [x for x in st if not x.drum and not x.perc and x.n >= 8]
+    # Arrangements often double a part on a second channel (another
+    # instrument, same notes). A copy adds nothing and, picked as the
+    # harmony, it hides the part that should have been there (Nintendo
+    # World Cup: lead and harmony were one part twice, the tune left out).
+    uniq = []
+    for x in mel:
+        if not any(y.iv == x.iv and y.pitches == x.pitches for y in uniq):
+            uniq.append(x)
+    mel = uniq
     if not mel:
         return "", "", "", "", ",".join(drums)   # percussion-only file
     span = max(x.last for x in mel) - min(x.first for x in mel) or 1
@@ -307,10 +316,15 @@ def auto_pick(mid, start=0.0, end=0.0):
     # the tune and takes the lead; the chord part is not dropped but moves
     # to the fourth voice (POKEY1 ch3). dbztheme: the vocal sits on a
     # sound-effect program (1:1) and lost the lead to the synth riff (1:2).
+    # The line has to carry on to the end, like a singer does: a solo that
+    # stops well before the song ends is an episode, not the tune (wily9:
+    # a guitar solo from 26 s to 75 s took the melody's place).
     voice4 = None
     if lead.poly > 0.5:
+        end = max(x.last for x in mel)
         sung = [x for x in high if x is not lead and x.poly < 0.05
-                and 1.0 <= x.step <= 4.0 and 62 <= x.mean <= 82 and x.ntop >= 40]
+                and 1.0 <= x.step <= 4.0 and 62 <= x.mean <= 82 and x.ntop >= 40
+                and x.last >= end - 0.12 * span]
         if sung:
             voice4, lead = lead, max(sung, key=lead_score)
     rest = [x for x in mel if x is not lead and x is not voice4]
@@ -481,6 +495,10 @@ def main():
     ap.add_argument("--preset-bass", default="BASS")
     ap.add_argument("--preset-harm", default="STRINGS")
     ap.add_argument("--preset-voice4", default="ORGAN")
+    for part_ in ("lead", "bass", "harm", "voice4"):
+        ap.add_argument(f"--octave-{part_}", type=int, default=0,
+                        help=f"move the {part_} part by this many octaves" if part_ == "lead"
+                        else argparse.SUPPRESS)
     ap.add_argument("--transpose", type=int, default=0)
     ap.add_argument("--start", type=float, default=0.0, help="skip to this second")
     ap.add_argument("--end", type=float, default=0.0)
@@ -531,6 +549,10 @@ def main():
         drums = [e for e in drums if e[1] > a.start]
     start_frame = round(a.start * FPS)
 
+    for k, o in (("lead", a.octave_lead), ("bass", a.octave_bass),
+                 ("harm", a.octave_harm), ("v4", a.octave_voice4)):
+        if o:
+            parts[k] = [(n + 12 * o, s0, s1) for n, s0, s1 in parts[k]]
     for k in parts:
         parts[k], _ = fit_range(parts[k], k, a.transpose)
     # The harmony plays on POKEY2's 8-bit voice, whose pitch resolution

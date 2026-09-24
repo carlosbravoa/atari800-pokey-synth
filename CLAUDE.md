@@ -204,6 +204,11 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   a track-3 note (`v3on`), so the layer keeps working in other songs; the
   panel's column 1 then reads VOICE. Mono drops track 3, and so does the
   synth's stream player.
+- **Stereo percussion**: every song so far writes all drums to drum
+  channel 0, so in stereo `cm_dr0` also starts the hit on block 8 (POKEY2
+  ch4, the DRUM2 meter) until the song sends a channel-1 drum itself
+  (`dr2used`, reset per song). DRUMCNT still counts one per hit. Verified
+  on hardware: both ch4 volumes peak at 15 on ANTHEM.
 - **Keys**: SPACE pause, `<` `>` song, RETURN replay, ESC stop, 1-9 pick,
   L/TAB song list. **The board sends PC arrow keys to joystick 1**
   (STICK0 $0278 goes $0D while Down is held), not to KBCODE, so arrow
@@ -238,6 +243,16 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
 - The firmware mounts any ATR size, but the bridge can't mount one: `atari.py
   send build/pokeyplayer.atr POKEYPLR.ATR` puts it on the SD, and a person
   mounts it on D1: from the OSD and boots.
+- **Disk contents = `disk.py`** (2026-09-24): 49 yays + 4 fillers, chosen
+  by ear with `audition.py` (one song at a time in the real player: `-D
+  AUDITION` build, bank in build/audition.bin, hot-swapped). Approved
+  files are frozen: re-running the converter must never replace them (its
+  rules still change). Hand-fixed parts live in audition.py FIXES; the
+  lessons: busier channels often beat the real (sparser, higher) tune, so
+  swapping lead/harmony was the fix 3 times; exact duplicate channels are
+  now skipped; the singer's-line rule needs the line to play into the
+  final 12% (wily9). Catalog 10 sectors = 53 songs; LSCR moved into
+  SCOPEB, `load_hide` clears the scope.
 - **Album** (`album.py` -> songs/album/, read by mkdisk.py and
   gen_songbank.py): full-length conversions. Rated songs (rated on their
   first 50 s) reuse the picks the current converter makes for that window,

@@ -45,9 +45,10 @@ SONGS    = $5000        ; song bank: catalog + event streams (disk: the one
 .ifdef DISK
 CAT      = $0C00        ; catalog, read from sectors CATSEC.. at startup
 CATSEC   = 4
-CATN     = 8            ; 8 x 128 bytes: up to 42 songs
+CATN     = 10           ; 10 x 128 bytes ($0C00-$10FF): up to 53 songs
 LOADING  = $0BC0        ; 1 = SIO owns POKEY: the VBI keeps its hands off
-LSCR     = $1000        ; the loading screen: 4 mode-7 lines of 20
+LSCR     = SCOPEB       ; the loading screen: 4 mode-7 lines of 20, in the
+                        ;  scope's buffer (the panel is hidden meanwhile)
 G_SOLID  = 6            ; loading bar: a filled cell (mode 7)
 G_HOLE   = 7            ;              an empty one
 SOUNDR   = $41
@@ -585,8 +586,19 @@ cm_dr0: sta LASTDL              ; 6: drum, POKEY1 ch4
         txa
         ldx #0
         jsr drum_start
-        jmp seq_next
+        lda STEREO              ; stereo, and the song never uses the second
+        beq @x                  ;  drum channel: mirror the hit onto it, so
+        lda dr2used             ;  the drums come from both speakers
+        bne @x
+        lda LASTDL
+        sta LASTDR
+        ldx #8
+        jsr drum_start
+        dec DRUMCNT             ; (one hit, whatever it sounds on)
+@x:     jmp seq_next
 cm_dr1: sta LASTDR              ; 7: drum, POKEY2 ch4
+        ldx #1                  ; the song has its own second drum part:
+        stx dr2used             ;  no more mirroring
         tax
         lda #8
         sta DRT,x
@@ -786,6 +798,7 @@ song_load:                      ; A = song index
         jsr lv_load
         lda #0                  ; the layer keeps ch3 until track 3 plays
         sta v3on
+        sta dr2used             ; drum channel 2 mirrors channel 1 until used
         lda #1                  ; POKEY2 carries its own voices (no mirror)
         sta STREAMON
         jsr sq_delta            ; the stream's first gap
@@ -1973,6 +1986,7 @@ load_screen:                    ; LOADING + empty bar, then show it (the caller
 load_hide:
         lda #0
         sta lshow
+        jsr scope_init          ; the loading screen used a scope buffer
         lda liston              ; back to whichever screen was up
         bne @l
         lda #<dlist
@@ -2292,10 +2306,12 @@ text_st:
         .endif
         .endrepeat
 .endmacro
+.segment "CODE2"                ; (MAIN is full in the disk build)
 m7_load:    M7 "      LOADING", $00
 m7_list:    M7 "     SONG LIST", $80
 m7_foot:    M7 "    POKEY PLAYER", $40
 m7_song:    M7 "   SONG    OF", $40
+.segment "RODATA"
 text_err:
         .byte 2,16,$80, "DISK ERROR",0
         .byte $FF
@@ -2348,6 +2364,7 @@ shold:  .res 1                  ; frames it has been held
 lrow:   .res 1                  ; list_rows' line counter
 lastsp: .res 1                  ; SPOS low byte at the last progress update
 v3on:   .res 1                  ; the song uses voice 4 (POKEY1 ch3)
+dr2used:.res 1                  ; the song plays drum channel 2 itself
 lastv3: .res 1
 n4cnt:  .res 1                  ; voice 4 note-ons (tests)
 lastpk: .res NBAR
@@ -2408,7 +2425,11 @@ presetnames:
 
 .ifndef DISK
 .segment "SONGS"
+.ifdef AUDITION
+.incbin "build/audition.bin"    ; one song to listen to (audition.py play)
+.else
 .incbin "songbank.bin"
+.endif
 .endif
 
 ; ===========================================================================

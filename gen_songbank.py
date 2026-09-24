@@ -43,7 +43,7 @@ def resolve(name):
     sys.exit(f"gen_songbank: no such song: {name}")
 
 
-def build(names):
+def build(names, out="songbank.bin"):
     songs = []
     for name in names:
         path = resolve(name)
@@ -76,8 +76,8 @@ def build(names):
         addr += len(ev)
         body += ev
     blob = bytes(cat) + bytes(body)
-    open(os.path.join(HERE, "songbank.bin"), "wb").write(blob)
-    print(f"songbank.bin: {len(keep)} songs, {len(blob)} bytes "
+    open(os.path.join(HERE, out), "wb").write(blob)
+    print(f"{out}: {len(keep)} songs, {len(blob)} bytes "
           f"(${BASE:04X}-${BASE + len(blob) - 1:04X}, "
           f"{BANK_SIZE - len(blob)} free)")
 
