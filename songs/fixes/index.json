@@ -43,5 +43,10 @@
   "midi": "/home/carlos/Music/seleccion/RR_Music1.mid",
   "title": "RR MUSIC 1",
   "options": "--lead 2:1 --bass 3:2 --harm 5:3 --drums 4:10 --octave-bass -1"
+ },
+ "worldcup_beat": {
+  "midi": "/home/carlos/Music/seleccion/Nintendo_World_Cup_-_Golden_Goal.mid",
+  "title": "WORLD CUP GOAL",
+  "options": "--lead 2:1 --bass 7:6 --harm 4:3 --beat"
  }
 }

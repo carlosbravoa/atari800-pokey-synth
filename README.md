@@ -139,6 +139,7 @@ Useful options:
 | `--preset-lead P` (also `-bass`, `-harm`, `-voice4`) | choose the instrument: PIANO ORGAN FLUTE STRINGS BASS CHIPARP SYNTH BELL LASER UFO |
 | `--lead 5:4,3:2` | several parts feed one voice. The first one wins when both play |
 | `--octave-bass N` (also `-lead`, `-harm`, `-voice4`) | move one part by N octaves (e.g. `-1` for a deeper bass) |
+| `--beat` | the MIDI has no drums: add a pop-rock beat on the song's own pulse (kick and snare on the left POKEY, hats and crashes on the right) |
 | `--no-drop` | keep the harmony at its written octave (sometimes sounds better than the tuned-down default) |
 | `--no-double`, `--echo N` | control the octave double and echo added to single-part songs |
 

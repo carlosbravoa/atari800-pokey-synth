@@ -64,7 +64,8 @@ YAY = [
     # hand-fixed (audition.py FIXES)
     (F + "MM1-_Elecman.psq", "ELEC MAN"),
     (F + "mm3magnt_2.psq", "MAGNET MAN"),
-    (F + "Nintendo_World_Cup_-_Golden_Goal.psq", "WORLD CUP GOAL"),
+    # no drums in the MIDI: midi2psq ... --lead 2:1 --bass 7:6 --harm 4:3 --beat
+    (F + "worldcup_beat.psq", "WORLD CUP GOAL"),
     (F + "Puyo-Puyo-Tsu-Remix-By-Matthew.psq", "PUYO PUYO TSU"),
     (F + "sf2ken.psq", "SF2 KEN"),
     (F + "RR_Music1.psq", "RR MUSIC 1"),

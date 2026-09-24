@@ -209,6 +209,14 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   ch4, the DRUM2 meter) until the song sends a channel-1 drum itself
   (`dr2used`, reset per song). DRUMCNT still counts one per hit. Verified
   on hardware: both ch4 volumes peak at 15 on ANTHEM.
+- **Generated beat** (`midi2psq.py --beat`, for MIDIs with no drums):
+  game-music MIDIs are often real-time captures whose tempo/bar lines mean
+  nothing, so `find_pulse` fits the eighth-note period and phase to the
+  note onsets (circular mean, searched over 0.17-0.33 s so it can't lock to
+  the half or double), and the bar start is the eighth where long notes
+  begin. Kick/snare go on drum channel 0, hats/crash on channel 1: the two
+  POKEYs play them at once, nothing cuts off. WORLD CUP GOAL: 140 BPM,
+  approved on the board.
 - **Keys**: SPACE pause, `<` `>` song, RETURN replay, ESC stop, 1-9 pick,
   L/TAB song list. **The board sends PC arrow keys to joystick 1**
   (STICK0 $0278 goes $0D while Down is held), not to KBCODE, so arrow

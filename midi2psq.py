@@ -30,6 +30,7 @@ What it has to decide, and how:
 Reuses the MIDI reading of ../tools/midi2pokey.py (skill: atari-music).
 """
 import argparse
+import math
 import os
 import sys
 
@@ -397,6 +398,68 @@ def auto_pick(mid, start=0.0, end=0.0):
     return j(leads), j(basses), j(harms), j(v4s), ",".join(drums)
 
 
+def find_pulse(onsets, lo=0.17, hi=0.33):
+    """-> (eighth-note period, phase) in seconds that best line the note
+    onsets up. Game-music MIDIs are often captures played in real time,
+    so the file's own tempo and bar lines say nothing. The search range
+    (90-176 BPM) keeps it off the half and double of the pulse."""
+    import cmath, math
+    best = (0.0, lo, 0.0)
+    e = lo
+    while e <= hi:
+        z = sum(cmath.exp(2j * math.pi * t / e) for t in onsets) / len(onsets)
+        if abs(z) > best[0]:
+            best = (abs(z), e, (cmath.phase(z) / (2 * math.pi)) % 1 * e)
+        e += 0.0005
+    return best[1], best[2], best[0]
+
+
+def add_beat(w, parts, start_frame):
+    """A pop-rock beat for a file with no percussion, on the song's pulse:
+    kick on 1 and 3, snare on 2 and 4 (drum channel 0, the left POKEY),
+    closed hats on the eighths and a crash every 8 bars (channel 1, the
+    right POKEY, so hats never cut the kick). A tom fill ends each 8 bars."""
+    notes = [e for k in ("bass", "lead", "harm") for e in parts.get(k, [])]
+    if not notes:
+        return 0
+    onsets = [s0 for _, s0, _ in notes]
+    eighth, phase, strength = find_pulse(onsets)
+    first, last = min(onsets), max(s1 for _, _, s1 in notes)
+    # which eighth of the bar is the downbeat: long notes start on strong beats
+    score = [0.0] * 8
+    for _, s0, s1 in notes:
+        j = round((s0 - phase) / eighth)
+        score[j % 8] += min(s1 - s0, 4 * eighth)
+    down = max(range(8), key=lambda b: score[b])
+    print(f"  beat: {60 / (2 * eighth):.1f} BPM (alignment {strength:.2f}), "
+          f"bars start on eighth {down}")
+    fr = lambda t: max(0, round(t * FPS) - start_frame)
+    j = math.ceil((first - phase) / eighth)
+    # start the beat on the first bar line at or after the first note
+    while (j - down) % 8:
+        j += 1
+    hits = 0
+    while True:
+        t = phase + j * eighth
+        if t > last:
+            break
+        pos, bar = (j - down) % 8, (j - down) // 8
+        fill = bar % 8 == 7 and pos >= 4
+        if fill:
+            w.drum(fr(t), {4: 1, 5: 1, 6: 4, 7: 5}[pos], 0)   # snare snare tom tom2
+        elif pos in (0, 4):
+            w.drum(fr(t), 0, 0)                                # kick
+        elif pos in (2, 6):
+            w.drum(fr(t), 1, 0)                                # snare
+        if pos == 0 and bar % 8 == 0:
+            w.drum(fr(t), 7, 1)                                # crash
+        elif not fill:
+            w.drum(fr(t), 2, 1)                                # closed hat
+        hits += 1
+        j += 1
+    return hits
+
+
 def coverage_check(parts, drums, length):
     """the heuristic that catches a wrong track choice: how much of the
     song each part actually plays, and where the long silences are"""
@@ -509,6 +572,9 @@ def main():
     ap.add_argument("--no-drop", action="store_true",
                     help="keep the harmony at its written octave even if it "
                          "sits above the 8-bit voice's accurate range")
+    ap.add_argument("--beat", action="store_true",
+                    help="no drums in the file: add a pop-rock beat locked to the "
+                         "song's own pulse (found from its note onsets)")
     ap.add_argument("--no-double", action="store_true",
                     help="leave a single-part file as one voice")
     a = ap.parse_args()
@@ -630,6 +696,8 @@ def main():
         hits += 1
     if unknown:
         print(f"  drums: unmapped GM notes {sorted(unknown)} played as hats")
+    if a.beat and not drums:
+        hits += add_beat(w, parts, start_frame)
     last = max([e[2] for p in parts.values() for e in p] +
                [e[1] for e in drums] + [0])
     w.at(max(0, round(last * FPS) - start_frame) + 30, psq.ALLOFF)
