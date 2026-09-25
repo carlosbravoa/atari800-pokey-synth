@@ -153,11 +153,18 @@ dlist:
         .byte $C2,<(SCREEN+17*40),>(SCREEN+17*40)       ; 17 rule       +DLI
         .byte $02                                       ; 18 drum LEDs
         .byte $C2,<(SCREEN+19*40),>(SCREEN+19*40)       ; 19 drum names +DLI
+.ifdef JAM
+        .byte $42,<(SCREEN+20*40),>(SCREEN+20*40)       ; 20 (no scope: the
+        .byte $82                                       ; 21  panel's time goes
+        .byte $02                                       ; 22  to the composer)
+        .byte $02                                       ; 23 keys, credit
+.else
 scope_lms:                                              ; 20-22: the scope,
         .byte $4E,<SCOPEA,>SCOPEA                       ;  24 ANTIC E lines
         .res  22,$0E
         .byte $8E                                       ;  last line   +DLI
         .byte $42,<(SCREEN+23*40),>(SCREEN+23*40)       ; 23 keys
+.endif
         .byte $41,<dlist,>dlist
 
 .ifdef DISK
@@ -288,7 +295,9 @@ start:
         jsr detect_stereo
         jsr cls
         jsr draw_static
+.ifndef JAM
         jsr scope_init
+.endif
         lda #7
         ldx #>vbi
         ldy #<vbi
@@ -978,7 +987,9 @@ key_cmd:                        ; A = a new key press
 draw_all:
         jsr draw_bars
         jsr draw_leds
+.ifndef JAM
         jsr draw_scope
+.endif
         jsr draw_voices
         jsr draw_prog
         jmp draw_time
@@ -1350,6 +1361,7 @@ put_inst:                       ; X = column, A = $FF none / preset 0-9
         bpl @c
 .endmacro
 
+.ifndef JAM                     ; POKEY JAM has no oscilloscope
 scope_init:
         lda #>SCOPEB
         sta scback
@@ -1736,6 +1748,7 @@ sc_flip:
         cpx #24*8
         bne @t
         rts
+.endif
 
 ; ---- progress bar and clock ----------------------------------------------
 draw_prog:                      ; follows the song's own clock (SPOS), so
@@ -2349,7 +2362,8 @@ text_all:
         .byte 17,14,$00," PERCUSSION ",0
         .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
 .ifdef JAM
-        .byte 23,0,$00, "SPACE PAUSE  <> STYLE  RET NEW  R RANDOM",0
+        .byte 22,0,$00, "SPACE PAUSE  <> STYLE  RET NEW  R RANDOM",0
+        .byte 23,12,$00,"(c) Carlos Bravo",0
 .else
         .byte 23,0,$00, "SPACE PAUSE  <> SONG  TAB LIST  ESC STOP",0
 .endif
@@ -2461,8 +2475,10 @@ lbcell: .res 1
 ; ===========================================================================
 .segment "HIDATA"
 .align 256
+.ifndef JAM
 .include "scope.inc"            ; its tables must be page-aligned
 .assert <sc_sine = 0 && <sc_square = 0, error, "scope tables must be page-aligned"
+.endif
 .include "tables.inc"
 ; names for the panel (moved here: MAIN is full in the disk build)
 notenames:
@@ -2626,7 +2642,9 @@ list_open:
 list_close:
         lda #0
         sta liston
+.ifndef JAM
         jsr scope_init          ; the list used the scope's buffer
+.endif
         lda #<dlist
         sta SDLSTL
         lda #>dlist
