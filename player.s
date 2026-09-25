@@ -536,6 +536,10 @@ ev_loop:
 @go:    ldx vt2
         cpx #SCMDN
         bcs @next               ; dropped in this mode
+.ifdef JAM
+        jsr jam_mute            ; a muted voice's notes are skipped
+        bcs @next
+.endif
         inc SEVN
         lda cmd_hi,x
         pha
@@ -965,10 +969,15 @@ key_cmd:                        ; A = a new key press
         dex
         bpl @d
         rts
-@pick:  cpx NSONG
+@pick:
+.ifdef JAM
+        jmp jam_key             ; 1-6: voices on/off
+.else
+        cpx NSONG
         bcs @r
         txa
         jmp song_load
+.endif
 @next:  jmp next_song
 @prev:  jmp prev_song
 @list:  jmp list_open
@@ -2371,7 +2380,7 @@ text_all:
         .byte 17,14,$00," PERCUSSION ",0
         .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
 .ifdef JAM
-        .byte 22,0,$00, "SPACE PAUSE  <> STYLE  RET NEW  R RANDOM",0
+        .byte 22,0,$00, " 1-6 MUTE  <> STYLE  RET NEW  R RANDOM",0
         .byte 23,12,$00,"(c) Carlos Bravo",0
 .else
         .byte 23,0,$00, "SPACE PAUSE  <> SONG  TAB LIST  ESC STOP",0
