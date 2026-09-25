@@ -11,7 +11,7 @@ import sys
 
 ROUTINES = [
     # lead voice + helpers
-    "synth", "coprime", "note_play", "note_stop", "note_start",
+    "laytune", "synth", "coprime", "note_play", "note_stop", "note_start",
     "poly_out", "poly_pitch",
     # loop voices (the player's 2nd and 3rd voices)
     "lv_load", "lv_on", "lv_off", "v2_owns", "lv_step", "lv_tones", "lv_pitch",

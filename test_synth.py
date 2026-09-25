@@ -353,8 +353,8 @@ tap(SP)
 check(mem[L("LSTATE")] == 2 and mem[L("T1USED")] == 0, "drums-only loop playing")
 for _ in range(4): frame(A)
 check(mem[0xD205] & 0xF0 == 0xA0 and mem[0xD205] & 0x0F > 5
-      and mem[0xD204] == mem[L("lay64") + 48],
-      f"ORGAN layer still on ch3 (AUDC3 {mem[0xD205]:02X}, AUDF3 = C5 octave)")
+      and mem[0xD204] == mem[L("lay64") + 36],
+      f"ORGAN layer still on ch3 (AUDC3 {mem[0xD205]:02X}, AUDF3 = C4: the octave layer folds below A4 to stay in tune)")
 for _ in range(20): frame()
 tap(BK)
 
@@ -433,7 +433,7 @@ check(mem[L("NOTE")] == 36 and mem[L("VOLHI")] > 0, "  live playing works over t
 for _ in range(30): frame()
 call("select_preset", a=1)             # ORGAN: its octave layer gets ch3 back
 for _ in range(4): frame(A)
-check(mem[0xD205] & 0x0F > 5 and mem[0xD204] == mem[L("lay64") + 48],
+check(mem[0xD205] & 0x0F > 5 and mem[0xD204] == mem[L("lay64") + 36],
       "  the layer has ch3 back while muted")
 for _ in range(30): frame()
 tap(MQ)
@@ -484,7 +484,7 @@ check(seen["p2d"] > 0 and seen["p1d"] == 0, f"loop drums on POKEY2 ch4 only ({se
 check(mem[L("PRESET")] == 0, "the lead keeps the player's PIANO (track 2 has its own voice)")
 call("select_preset", a=1)             # ORGAN: layer stays on POKEY1 ch3
 for _ in range(4): frame(A)
-check(mem[0xD205] & 0x0F > 5 and mem[0xD204] == mem[L("lay64") + 48],
+check(mem[0xD205] & 0x0F > 5 and mem[0xD204] == mem[L("lay64") + 36],
       "POKEY1 ch3 keeps the lead's layer while the loop plays")
 for _ in range(30): frame()
 frame(C)

@@ -667,6 +667,7 @@ cm_v3f: ldx #V3X                ; 15
 cm_p3:  ldx #V3X                ; 16: voice 4's instrument
         jsr lv_load
         jmp seq_next
+.segment "CODE2"                ; (MAIN is full in the disk build)
 cm_lv0: sta MIXL                ; 17-20 (psq op 5 LEVEL): a track's volume cap
         jmp seq_next
 cm_lv1: sta MIXV
@@ -675,6 +676,7 @@ cm_lv2: sta MIXV+1
         jmp seq_next
 cm_lv3: sta MIXV+2
         jmp seq_next
+.segment "CODE"
 cm_end: lda #0                  ; 13: end of song -> the main thread advances
         sta PLAYING
         lda #1

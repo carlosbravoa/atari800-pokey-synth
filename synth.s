@@ -3729,6 +3729,19 @@ lv_pitch:                       ; A = semitones above track 1's note -> AUDF
 @rs:    lda rasp64,y
         rts
 
+; the layer and echo play on POKEY1 ch3, 8-bit at 64 kHz: within ~3 cents up
+; to A4 (note 45), 10-50 cents off above it -- against the 16-bit lead that
+; is heard as out of tune. Higher layer notes drop by octaves to A4 or below.
+laytune:                        ; A = note index -> A
+        cmp #96
+        bcc @t
+        lda #95
+@t:     cmp #46
+        bcc @x
+        sbc #12
+        jmp @t
+@x:     rts
+
 ; ---------------------------------------------------------------------------
 synth:
         ; ---- chord arpeggio: NOTEIDX = NOTE + chord offset
@@ -4092,10 +4105,8 @@ synth:
         adc layofs-1,x
         bpl @l1
         lda NOTEIDX             ; sub below C1: stay on the note
-@l1:    cmp #96
-        bcc @l2
-        lda #95
-@l2:    tay
+@l1:    jsr laytune             ; in tune on the 8-bit channel
+        tay
         lda lay64,y
         cpx #4                  ; chorus: detune one step
         bne @l3
@@ -4118,7 +4129,9 @@ synth:
         adc #11
         and #31
         tax
-        ldy ECHON,x
+        lda ECHON,x
+        jsr laytune
+        tay
         lda lay64,y
         sta SAUDF3
         lda ECHOV,x
