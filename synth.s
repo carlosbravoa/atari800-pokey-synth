@@ -120,6 +120,9 @@ ZCOL    = $8A
 ZATTR   = $8B
 
 ; ---- page-6 state (peekable) ----
+MIXL     = $06F0        ; lead volume cap (0 = none): a mix level for players
+MIXV     = $06F1        ; 3: voice caps, blocks 0 / VBS / the rest (voice 4)
+MIXT     = $06F4        ; scratch for the voice cap
 PRESET   = $0600        ; 0-9 current instrument
 OCTAVE   = $0601        ; 1-7
 OCTBASE  = $0602        ; (OCTAVE-1)*12, read by the VBI at note-on
@@ -475,6 +478,10 @@ start:
 @z6:    sta $0600,x
         dex
         bpl @z6
+        ldx #3                  ; mix levels: full
+@zm:    sta MIXL,x
+        dex
+        bpl @zm
         ldx #$3F
 @ze:    sta ECHON,x
         dex
@@ -3622,9 +3629,22 @@ lv_go = @go
         sta V_VHI,x
         sta V_VLO,x
         sta V_EST,x
-@vo:    ldy V_PAR,x
+@vo:    ldy #0                  ; mix level of this voice block
+        cpx #0
+        beq @vi
+        iny
+        cpx #VBS
+        beq @vi
+        iny
+@vi:    lda MIXV,y
+        beq @vf                 ; 0 = full
+        cmp V_VHI,x
+        bcc @vc
+@vf:    lda V_VHI,x
+@vc:    sta MIXT
+        ldy V_PAR,x
         lda wavebits,y
-        ora V_VHI,x
+        ora MIXT
         ldy VT2
         pha
         lda VT3
@@ -4033,7 +4053,12 @@ synth:
         sta ESTATE
 @edone: ldx P_WAVE
         lda VOLHI
-        ora wavebits,x
+        ldy MIXL                ; mix level: the volume never exceeds it
+        beq @mx
+        cpy VOLHI
+        bcs @mx
+        tya
+@mx:    ora wavebits,x
         sta SAUDC2
         lda #0
         sta SAUDC1

@@ -220,6 +220,10 @@ start:
 @z6:    sta $0600,x
         dex
         bpl @z6
+        ldx #3                  ; mix levels: full
+@zm:    sta MIXL,x
+        dex
+        bpl @zm
         ldx #$3F
 @ze:    sta ECHON,x
         dex
@@ -663,6 +667,14 @@ cm_v3f: ldx #V3X                ; 15
 cm_p3:  ldx #V3X                ; 16: voice 4's instrument
         jsr lv_load
         jmp seq_next
+cm_lv0: sta MIXL                ; 17-20 (psq op 5 LEVEL): a track's volume cap
+        jmp seq_next
+cm_lv1: sta MIXV
+        jmp seq_next
+cm_lv2: sta MIXV+1
+        jmp seq_next
+cm_lv3: sta MIXV+2
+        jmp seq_next
 cm_end: lda #0                  ; 13: end of song -> the main thread advances
         sta PLAYING
         lda #1
@@ -690,11 +702,13 @@ cmd_lo:     .byte <(cm_non-1),<(cm_nof-1),<(cm_v0n-1),<(cm_v0f-1)
             .byte <(cm_v1n-1),<(cm_v1f-1),<(cm_dr0-1),<(cm_dr1-1)
             .byte <(cm_pre-1),<(cm_p0-1),<(cm_p1-1),<(cm_par-1)
             .byte <(cm_off-1),<(cm_end-1),<(cm_v3n-1),<(cm_v3f-1),<(cm_p3-1)
+            .byte <(cm_lv0-1),<(cm_lv1-1),<(cm_lv2-1),<(cm_lv3-1)
 cmd_hi:     .byte >(cm_non-1),>(cm_nof-1),>(cm_v0n-1),>(cm_v0f-1)
             .byte >(cm_v1n-1),>(cm_v1f-1),>(cm_dr0-1),>(cm_dr1-1)
             .byte >(cm_pre-1),>(cm_p0-1),>(cm_p1-1),>(cm_par-1)
             .byte >(cm_off-1),>(cm_end-1),>(cm_v3n-1),>(cm_v3f-1),>(cm_p3-1)
-SCMDN = 17
+            .byte >(cm_lv0-1),>(cm_lv1-1),>(cm_lv2-1),>(cm_lv3-1)
+SCMDN = 21
 
 hush:                           ; every voice silent, envelopes reset
         lda #0
@@ -744,6 +758,11 @@ song_load:                      ; A = song index
         sta PENDN
         lda #60
         sta SECTMR
+        ldx #3                  ; every song starts at full level
+        lda #0
+@mx:    sta MIXL,x
+        dex
+        bpl @mx
         jsr hush
         jsr clear_meters
         lda SONGN               ; PSCR = its catalog entry
@@ -805,13 +824,13 @@ song_load:                      ; A = song index
 .endif
         lda STEREO              ; pick the command map for this machine
         beq @mono
-        ldy #19
+        ldy #23
 @cs:    lda map_st,y
         sta mapt,y
         dey
         bpl @cs
         bmi @st
-@mono:  ldy #19
+@mono:  ldy #23
 @cm:    lda map_mono,y
         sta mapt,y
         dey
@@ -902,7 +921,15 @@ key_cmd:                        ; A = a new key press
         ldx liston
         beq @panel
         jmp list_key
-@panel: cmp #K_L
+@panel:
+.ifdef JAM
+        cmp #K_R                ; R: RANDOM, a style per tune
+        bne @nr
+        lda #NSTYLES
+        jmp song_load
+@nr:
+.endif
+        cmp #K_L
         beq @list
         cmp #K_TAB
         beq @list
@@ -2264,9 +2291,9 @@ tramp_code:                     ; hot-swap trampoline, copied to $0680
 ; psq op/track -> the engine's command number ($FF = not in this mode).
 ; Track 3 (voice 4) needs POKEY1 ch3, which mono spends on track 1.
 ;   ops 0 note-on, 1 note-off, 2 drum, 3 preset, 4 param; index = op*4+track
-map_st: .byte 0,2,4,14, 1,3,5,15, 6,7,6,6, 8,9,10,16, 11,11,11,11
+map_st: .byte 0,2,4,14, 1,3,5,15, 6,7,6,6, 8,9,10,16, 11,11,11,11, 17,18,19,20
 map_mono:
-        .byte 0,2,$FF,$FF, 1,3,$FF,$FF, 6,6,6,6, 8,9,$FF,$FF, 11,11,11,11
+        .byte 0,2,$FF,$FF, 1,3,$FF,$FF, 6,6,6,6, 8,9,$FF,$FF, 11,11,11,11, 17,18,$FF,$FF
 
 vusrc_st:   .byte 3,5,7,3+P2,5+P2,7+P2      ; AUDC of each metered voice
 vusrc_mo:   .byte 3,5,7,$FF,$FF,$FF
@@ -2321,7 +2348,7 @@ text_all:
         .byte 17,14,$00," PERCUSSION ",0
         .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
 .ifdef JAM
-        .byte 23,0,$00, "SPACE PAUSE  <> STYLE  RET NEW  TAB LIST",0
+        .byte 23,0,$00, "SPACE PAUSE  <> STYLE  RET NEW  R RANDOM",0
 .else
         .byte 23,0,$00, "SPACE PAUSE  <> SONG  TAB LIST  ESC STOP",0
 .endif
@@ -2373,7 +2400,7 @@ text_mono:
 vusrc:  .res 6
 vupk:   .res 6
 vufal:  .res 6
-mapt:   .res 20
+mapt:   .res 24
 ncode:  .res 6
 pcode:  .res 6
 lastn:  .res 6

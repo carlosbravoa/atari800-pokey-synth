@@ -30,6 +30,8 @@ FILE FORMAT
                 LASER UFO)
     4  PARAM    arg = param<<4 | value, lead track only (param order: WAVE
                 ATK DEC SUS REL LAYER VIB VIBSPD CHORD CHDSPD SWEEP GLIDE)
+    5  LEVEL    arg = volume cap 0-15 for the track (0 = none), POKEY
+                PLAYER / POKEY JAM only
     14 ALLOFF
     15 END
 
@@ -55,13 +57,14 @@ import struct
 MAGIC = b"PSQ1"
 MONO, STEREO, EITHER = 0, 1, 2
 NOTE_ON, NOTE_OFF, DRUM, PRESET, PARAM, ALLOFF, END = 0, 1, 2, 3, 4, 14, 15
+LEVEL = 5
 PRESETS = "PIANO ORGAN FLUTE STRINGS BASS CHIPARP SYNTH BELL LASER UFO".split()
 DRUMS = "kick snare hat open tom tom2 clap crash".split()
 NAMES = "C C# D D# E F F# G G# A A# B".split()
 
 # op -> does it carry an argument
 HAS_ARG = {NOTE_ON: True, NOTE_OFF: False, DRUM: True, PRESET: True,
-           PARAM: True, ALLOFF: False, END: False}
+           PARAM: True, LEVEL: True, ALLOFF: False, END: False}
 
 # (op, track) -> the Atari's stream command, per mode
 CMD = {
