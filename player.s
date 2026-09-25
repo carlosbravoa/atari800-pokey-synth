@@ -61,6 +61,8 @@ DBUFHI   = $0305
 DAUX1    = $030A
 DAUX2    = $030B
 DSKINV   = $E453
+.elseif .defined(JAM)
+CAT      = $0C00        ; POKEY JAM: the style list, built at start
 .else
 CAT      = SONGS
 .endif
@@ -294,6 +296,9 @@ start:
 .ifdef DISK
         jsr read_catalog
 .endif
+.ifdef JAM
+        jsr jam_catalog         ; styles take the songs' place
+.endif
         lda CAT                 ; how many songs are in the bank
         sta NSONG
         lda #0
@@ -329,7 +334,11 @@ mainloop:
         sta PRESREQ
         pla
         jsr set_preset
-@d:     lda liston              ; the panel is hidden while the list is up
+@d:
+.ifdef JAM
+        jsr jam_pump            ; keep the composer a few bars ahead
+.endif
+        lda liston              ; the panel is hidden while the list is up
         bne @l
         jsr draw_all
 @l:     jmp mainloop
@@ -442,6 +451,10 @@ seq_step:
         beq seq_rts
         lda PAUSED
         bne seq_rts
+.ifdef JAM
+        jsr jam_vbi_ok          ; stall rather than read past the composer
+        bcc seq_rts
+.endif
         inc SPOS
         bne @s
         inc SPOS+1
@@ -522,6 +535,13 @@ sq_adv:                         ; VP += 1 (mirrored for peeking; keeps A)
         inc VP
         bne @h
         inc VP+1
+.ifdef JAM
+        lda VP+1                ; the event ring wraps
+        cmp #>(JRING+JRINGSZ)
+        bne @h
+        lda #>JRING
+        sta VP+1
+.endif
 @h:     lda VP
         sta SPTR
         lda VP+1
@@ -651,6 +671,12 @@ cm_end: lda #0                  ; 13: end of song -> the main thread advances
         jsr hush
         jmp seq_next
 seq_next:                       ; one event done: take the next delta
+.ifdef JAM
+        jsr jam_empty
+        bcc @r
+        rts
+@r:
+.endif
         jsr sq_delta
         lda ENDF
         bne @x
@@ -766,12 +792,17 @@ song_load:                      ; A = song index
         lda #>SONGS
         sta dsec+1
 .endif
+.ifdef JAM
+        lda SONGN               ; POKEY JAM: compose into the ring instead
+        jsr jam_start
+.else
         lda dsec
         sta VP
         sta SPTR
         lda dsec+1
         sta VP+1
         sta SPTR+1
+.endif
         lda STEREO              ; pick the command map for this machine
         beq @mono
         ldy #19
@@ -2276,7 +2307,11 @@ glyph_data:
 
 text_all:
         .byte 0,4,$00,  "POKEY",0
+.ifdef JAM
+        .byte 0,10,$C0, "JAM",0
+.else
         .byte 0,10,$C0, "PLAYER",0
+.endif
         .byte 2,0,$00,  "SONG",0
         .byte 2,8,$00,  "OF",0
         .byte 2,30,$00, ":",0
@@ -2285,7 +2320,11 @@ text_all:
         .byte 17,0,$00, "----------------------------------------",0
         .byte 17,14,$00," PERCUSSION ",0
         .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
+.ifdef JAM
+        .byte 23,0,$00, "SPACE PAUSE  <> STYLE  RET NEW  TAB LIST",0
+.else
         .byte 23,0,$00, "SPACE PAUSE  <> SONG  TAB LIST  ESC STOP",0
+.endif
         .byte $FF
 text_st:
         .byte 2,16,$00, "STEREO",0
@@ -2423,7 +2462,9 @@ presetnames:
         .byte 'U'-32,'F'-32,'O'-32,0,0
 
 
-.ifndef DISK
+.ifdef JAM
+.include "jamglue.s"            ; the composer, in the song bank's place
+.elseif .not .defined(DISK)
 .segment "SONGS"
 .ifdef AUDITION
 .incbin "build/audition.bin"    ; one song to listen to (audition.py play)
