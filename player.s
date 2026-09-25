@@ -953,7 +953,11 @@ key_cmd:                        ; A = a new key press
         beq @again
         cmp #K_ESC
         beq @stop
+.ifdef JAM
+        ldx #9                  ; 1-9, 0 pick a style
+.else
         ldx #8                  ; 1-9 pick a song
+.endif
 @d:     cmp numkeys,x
         beq @pick
         dex
@@ -2328,6 +2332,9 @@ sc_m40hi:   .repeat 24, I
             .endrepeat
 vulut:      .byte 0,1,2,4,5,6,7,8,10,11,12,13,14,16,17,18
 numkeys:    .byte $1F,$1E,$1A,$18,$1D,$1B,$33,$35,$30
+.ifdef JAM
+            .byte $32                       ; 0: the tenth style
+.endif
 
 ; DLI color bands: 0 status, 1 progress, 2 spacer, 3-11 meters (top to
 ; bottom), 12 labels, 13 percussion, 14 scope (PF0 graticule, PF1 trace,
