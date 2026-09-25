@@ -923,10 +923,9 @@ key_cmd:                        ; A = a new key press
         jmp list_key
 @panel:
 .ifdef JAM
-        cmp #K_R                ; R: RANDOM, a style per tune
+        cmp #K_R                ; R: RANDOM on/off (the music goes on)
         bne @nr
-        lda #NSTYLES
-        jmp song_load
+        jmp jam_rtoggle
 @nr:
 .endif
         cmp #K_L
