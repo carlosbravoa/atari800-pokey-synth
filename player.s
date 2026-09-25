@@ -62,7 +62,9 @@ DAUX1    = $030A
 DAUX2    = $030B
 DSKINV   = $E453
 .elseif .defined(JAM)
-CAT      = $0C00        ; POKEY JAM: the style list, built at start
+CAT      = $0480        ; POKEY JAM: the style list, built at start ($0480-
+                        ;  $057F: free once BASIC is gone; up to 10 styles --
+                        ;  $0C00 is the composer's since 10 styles overran it)
 .else
 CAT      = SONGS
 .endif
