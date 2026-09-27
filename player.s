@@ -947,7 +947,10 @@ key_cmd:                        ; A = a new key press
         cmp #K_R                ; R: RANDOM on/off (the music goes on)
         bne @nr
         jmp jam_rtoggle
-@nr:
+@nr:    cmp #$25                ; M: one POKEY, STEREO>MONO / MONO>MONO mix
+        bne @nm
+        jmp jam_mtoggle
+@nm:
 .endif
         cmp #K_L
         beq @list

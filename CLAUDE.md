@@ -213,9 +213,10 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   sound the user picked by ear. A wrong detect_stereo can't change it
   (detection is only at startup: re-run mid-play it flipped a mono board
   to stereo). The panel reads MONO and meters BASS HARM DRUM2 only.
-  `map_jmono` (bass on the lead's pair) and the BASS/CHORD mono labels are
-  no longer reached in the JAM build. POKEY PLAYER's own mono fold
-  (`map_mono`) is unchanged.
+  M switches one-POKEY machines to MONO>MONO (`jam_mtoggle`: STEREO = 0,
+  `map_jmono`: bass on the lead's 16-bit pair, chords on ch3, every drum on
+  ch4; panel BASS CHORD DRUM) and back. Still no lead. POKEY PLAYER's own
+  mono fold (`map_mono`) is unchanged.
 - **Stereo percussion**: every song so far writes all drums to drum
   channel 0, so in stereo `cm_dr0` also starts the hit on block 8 (POKEY2
   ch4, the DRUM2 meter) until the song sends a channel-1 drum itself
