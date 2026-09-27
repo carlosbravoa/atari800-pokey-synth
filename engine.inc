@@ -1402,29 +1402,25 @@ pokey_out:
 ; ---------------------------------------------------------------------------
 ; DLI: piano colors for rows 3-7, GR.0 colors again from row 8
 
-; Second POKEY at $D210? With no stereo hardware $D21x mirrors POKEY1, so:
-; run POKEY1, then put "$D21F" into init. Mirror -> POKEY1 itself is now in
-; init and RANDOM freezes; real POKEY2 -> POKEY1's RANDOM keeps running.
-; Safe on any Atari (a few microseconds of POKEY1 init at worst).
+; Second POKEY at $D210? With no stereo hardware $D21x mirrors POKEY1, so
+; its read registers are POKEY1's: KBCODE and SKSTAT read the same through
+; $D209/$D219 and $D20F/$D21F. A real POKEY2 has no keyboard (Tang core: KBCODE
+; $FF, SKSTAT $F7), so they differ. Measured on the Tang board 2026-09-27: the
+; older test (put "$D21F" into init, see whether POKEY1's RANDOM freezes) fails
+; there -- the FPGA POKEY's RANDOM kept running in init 10 times out of 16 --
+; and called a one-POKEY setup stereo. Reading disturbs nothing.
 detect_stereo:
         lda #0
         sta STEREO              ; VBI stays off POKEY2 meanwhile
         php
         sei
-        lda #3
-        sta SKCTL
-        lda #0
-        sta SKCTL+P2
-        ldx #8
-@s:     lda RANDOM
-        cmp RANDOM
+        lda KBCODE
+        cmp KBCODE+P2
         bne @st
-        dex
-        bne @s
-        lda #3                  ; mono: POKEY1 back out of init
-        sta SKCTL+P2
-        sta SKCTL
-        plp
+        lda SKSTAT
+        cmp SKSTAT+P2
+        bne @st
+        plp                     ; mono: the same chip twice
         rts
 @st:    lda #3
         sta SKCTL+P2
