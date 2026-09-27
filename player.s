@@ -847,15 +847,17 @@ song_load:                      ; A = song index
         dey
         bpl @cs
         bmi @st
-@mono:  ldy #23
+@mono:
 .ifdef JAM
-@cm:    lda map_jmono,y         ; POKEY JAM: bass + chords + drums (jamglue.s)
+        jsr jam_monomap         ; POKEY JAM: its one-POKEY layouts (jamglue.s)
+        jmp @st
 .else
+        ldy #23
 @cm:    lda map_mono,y
-.endif
         sta mapt,y
         dey
         bpl @cm
+.endif
 @st:    lda #0                  ; a fresh, quiet band
         jsr set_preset
         ldx #0
@@ -947,7 +949,10 @@ key_cmd:                        ; A = a new key press
         cmp #K_R                ; R: RANDOM on/off (the music goes on)
         bne @nr
         jmp jam_rtoggle
-@nr:
+@nr:    cmp #$25                ; M: one POKEY, LEAD / BAND layout
+        bne @nm
+        jmp jam_mtoggle
+@nm:
 .endif
         cmp #K_L
         beq @list
