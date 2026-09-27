@@ -204,12 +204,18 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   a track-3 note (`v3on`), so the layer keeps working in other songs; the
   panel's column 1 then reads VOICE. Mono drops track 3, and so does the
   synth's stream player.
-- **POKEY JAM on one POKEY** (`-D JAM`, `map_jmono` in music-gen's
-  jamglue.s): the lead's 16-bit pair plays the BASS track (an 8-bit
-  channel can't reach bass notes in tune), voice 0 on ch3 the comping,
-  ch4 every drum. The lead and voice 4 are dropped. Mono labels read
-  BASS CHORD DRUM and `jcolbit` maps keys 1-3 onto them. POKEY PLAYER's
-  own mono fold (`map_mono`) is unchanged: there the lead is the tune.
+- **POKEY JAM on one POKEY** (`-D JAM`, music-gen's jamglue.s): the user's
+  rule is NO LEAD in mono -- only the arrangement. POKEY JAM always runs
+  the stereo arrangement (`jam_catalog` keeps STEREO = 1; `JHW` $057F only
+  says what the machine is, for the panel). On one POKEY, $D21x folds onto
+  POKEY1 and `pokey_out` writes POKEY2's image last, so the mono mix is
+  bass (voice 0) + chords (voice 1) + drum channel 2, lead silent: the
+  sound the user picked by ear. A wrong detect_stereo can't change it
+  (detection is only at startup: re-run mid-play it flipped a mono board
+  to stereo). The panel reads MONO and meters BASS HARM DRUM2 only.
+  `map_jmono` (bass on the lead's pair) and the BASS/CHORD mono labels are
+  no longer reached in the JAM build. POKEY PLAYER's own mono fold
+  (`map_mono`) is unchanged.
 - **Stereo percussion**: every song so far writes all drums to drum
   channel 0, so in stereo `cm_dr0` also starts the hit on block 8 (POKEY2
   ch4, the DRUM2 meter) until the song sends a channel-1 drum itself
