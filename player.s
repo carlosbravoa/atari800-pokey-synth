@@ -848,7 +848,11 @@ song_load:                      ; A = song index
         bpl @cs
         bmi @st
 @mono:  ldy #23
+.ifdef JAM
+@cm:    lda map_jmono,y         ; POKEY JAM: bass + chords + drums (jamglue.s)
+.else
 @cm:    lda map_mono,y
+.endif
         sta mapt,y
         dey
         bpl @cm
@@ -1852,10 +1856,15 @@ put_2dig:                       ; A = 0-99 -> two digits at (PSCR),y
         sta (PSCR),y
         rts
 
+.ifdef JAM
+SNCOL    = 6                    ; STYLE nn OF nn
+.else
+SNCOL    = 5                    ; SONG nn OF nn
+.endif
 draw_songno:
-        lda #<(SCREEN+2*40+5)
+        lda #<(SCREEN+2*40+SNCOL)
         sta PSCR
-        lda #>(SCREEN+2*40+5)
+        lda #>(SCREEN+2*40+SNCOL)
         sta PSCR+1
         lda SONGN
         clc
@@ -2371,8 +2380,13 @@ text_all:
 .else
         .byte 0,10,$C0, "PLAYER",0
 .endif
+.ifdef JAM
+        .byte 2,0,$00,  "STYLE",0
+        .byte 2,9,$00,  "OF",0
+.else
         .byte 2,0,$00,  "SONG",0
         .byte 2,8,$00,  "OF",0
+.endif
         .byte 2,30,$00, ":",0
         .byte 2,33,$00, "/",0
         .byte 2,36,$00, ":",0
@@ -2381,7 +2395,7 @@ text_all:
         .byte 19,0,$00, "KICK SNAR HAT  OPEN TOM  TOM2 CLAP CRSH",0
 .ifdef JAM
         .byte 22,0,$00, " 1-6 MUTE  <> STYLE  RET NEW  R RANDOM",0
-        .byte 23,12,$00,"(c) Carlos Bravo",0
+        .byte 23,11,$00,"(c) 2026 Carlos B.",0
 .else
         .byte 23,0,$00, "SPACE PAUSE  <> SONG  TAB LIST  ESC STOP",0
 .endif
@@ -2423,8 +2437,13 @@ text_v4:
         .byte $FF
 text_mono:
         .byte 2,16,$00, "MONO",0
+.ifdef JAM
+        .byte 14,3,$00, "BASS",0        ; the lead's 16-bit pair plays the bass
+        .byte 14,9,$00, "CHORD",0       ; ch3 plays the comping
+.else
         .byte 14,3,$00, "LEAD",0
         .byte 14,9,$00, "VOICE",0
+.endif
         .byte 14,15,$00,"DRUM",0
         .byte $FF
 

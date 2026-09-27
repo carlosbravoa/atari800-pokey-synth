@@ -204,6 +204,12 @@ python3 hwplayer.py           # real keys on the board: > < SPACE RETURN, by pee
   a track-3 note (`v3on`), so the layer keeps working in other songs; the
   panel's column 1 then reads VOICE. Mono drops track 3, and so does the
   synth's stream player.
+- **POKEY JAM on one POKEY** (`-D JAM`, `map_jmono` in music-gen's
+  jamglue.s): the lead's 16-bit pair plays the BASS track (an 8-bit
+  channel can't reach bass notes in tune), voice 0 on ch3 the comping,
+  ch4 every drum. The lead and voice 4 are dropped. Mono labels read
+  BASS CHORD DRUM and `jcolbit` maps keys 1-3 onto them. POKEY PLAYER's
+  own mono fold (`map_mono`) is unchanged: there the lead is the tune.
 - **Stereo percussion**: every song so far writes all drums to drum
   channel 0, so in stereo `cm_dr0` also starts the hit on block 8 (POKEY2
   ch4, the DRUM2 meter) until the song sends a channel-1 drum itself
