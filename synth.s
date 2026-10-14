@@ -3733,9 +3733,19 @@ laytune:                        ; A = note index -> A
         bcc @t
         lda #95
 @t:     cmp #46
-        bcc @x
+        bcc @m
         sbc #12
-        jmp @t
+        bcs @t
+@m:     cmp #32                 ; the channel is still 5-11 cents off on B3 C#4
+        bcc @x                  ;  D#4 F4 F#4 G4 A4 (bad8): an octave lower
+        tay                     ;  still, where every note is within 4 cents
+        lda bad8-32,y
+        beq @k
+        tya
+        sec
+        sbc #12
+        rts
+@k:     tya
 @x:     rts
 
 ; ---------------------------------------------------------------------------
@@ -4344,6 +4354,7 @@ chord_len:   .byte 1, 3,3,4,2,3,3, 3   ;  voices arpeggiate it as MAJOR
 chord_ofs:   .byte 0,4,7, 0,3,7, 0,4,7,10, 0,12, 0,7,12, 0,3,6
 
 layofs:     .byte <-12, 7, 12, 0        ; SUB FIFTH OCT-UP CHORUS
+bad8:       .byte 0,0,0,1,0,1,0,1, 0,1,1,1,0,1,0,0   ; 8-bit notes 32-47 over 4 cents off
 swsh:       .byte 0, 9,8,7,6,5,4,3      ; sweep |n| -> shift
 vibtab:     .byte 0,1,2,1,0,3,4,3       ; 1/2 +half/+full, 3/4 -half/-full
 octbase:    .byte 0, 0,12,24,36,48,60,72

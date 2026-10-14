@@ -22,7 +22,7 @@ ROUTINES = [
 ]
 # the tables those routines index (chord shapes, drum kit, presets)
 DATA = ["wavebits", "chord_start", "chord_len", "chord_ofs", "layofs", "swsh",
-        "vibtab", "octbase", "dr_frq", "dr_dlt", "dr_ctl", "dr_vsh", "dr_clk",
+        "vibtab", "octbase", "bad8", "dr_frq", "dr_dlt", "dr_ctl", "dr_vsh", "dr_clk",
         "dr_seq", "dr_len", "drseq", "bad15", "pbase", "factory"]
 SKIP_EQU = {"SCMDN", "NDEMO"}
 

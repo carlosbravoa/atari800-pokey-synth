@@ -1841,6 +1841,7 @@ draw_time:
         jsr put_2dig
 @x:     rts
 
+.segment "CODE2"                ; (MAIN is full)
 put_2dig:                       ; A = 0-99 -> two digits at (PSCR),y
         ldx #0
 @t:     cmp #10
@@ -1858,6 +1859,7 @@ put_2dig:                       ; A = 0-99 -> two digits at (PSCR),y
         ora #$10
         sta (PSCR),y
         rts
+.segment "CODE"
 
 .ifdef JAM
 SNCOL    = 6                    ; STYLE nn OF nn
